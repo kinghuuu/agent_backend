@@ -1,0 +1,70 @@
+services:
+  # ============ PostgreSQL ============
+  postgres:
+    image: postgres:16-alpine
+    container_name: agent_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: agent_backend
+      TZ: Asia/Shanghai
+      PGTZ: Asia/Shanghai
+    ports:
+      # 宿主机 15400 -> 容器 5432
+      - "15400:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d agent_backend"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ============ Redis ============
+  redis:
+    image: redis:7-alpine
+    container_name: agent_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ============ FastAPI 后端 ============
+  backend:
+    build: .
+    container_name: agent_backend
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    env_file:
+      - .env
+    environment:
+      # 容器网络内使用服务名互通，注意端口是容器内端口 5432/6379
+      DB_HOST: postgres
+      DB_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      # 宿主机 15401 -> 容器 8000
+      - "15401:8000"
+    volumes:
+      # 挂载源码，开发时热重载
+      - ./app:/app/app
+      - ./main.py:/app/main.py
+      - ./alembic:/app/alembic
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
