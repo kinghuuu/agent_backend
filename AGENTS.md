@@ -16,6 +16,7 @@
 | --------------- | ---------------- | -------------------------------------------------------- |
 | 系统 / 健康检查 | `/api/v1/health` | 应用、PostgreSQL、Redis 连通状态                         |
 | 模型管理        | `/api/v1/models` | LLM / Embedding / Rerank 配置 CRUD、连通测试、上下文测试 |
+| 智能体          | `/api/v1/agent`  | 会话管理（新建 / 重命名 / 删除 / 清空）、多轮对话（流式 SSE + 非流式）、可用模型列表 |
 
 ## 2. 启动与常用命令
 
@@ -144,3 +145,5 @@ agent_backend/
 | 2026-11-05 | 文档 | 刷库流程  | `AGENTS.md` 第 2 节, `README.md`                                                                                                  | 将"改 models 后同步数据库"两步命令与注意点提升为高频操作章节                                                                                                                                                                             |
 | 2026-11-05 | 重构 | 视图归属  | `app/modules/*/view.py`, `main.py`                                                                                                | 接口视图从独立的 `app/views/` 下沉到各模块内 `view.py`，路由改在 `main.py` 的 `create_app()` 中注册；接口路径不变                                                                                                                        |
 | 2026-11-06 | 重构 | 模块内子包 | `app/modules/*/models/`, `schemas/`, `crud/`, `services/`, `views/` | 模块内单文件升级为分层子包：`repository` 改回 `crud`，各分层是文件夹、内部按功能拆多个 .py（model_config 已拆出 model_config / model_test 两个功能）；`views/__init__.py` 聚合路由并声明资源前缀；新增 `views/common.py` 提供 `get_model_or_404` 依赖。接口路径与表结构不变 |
+| 2026-11-06 | 新增 | 智能体 | `app/modules/agent/**`, `app/utils/llm.py`, `alembic/versions/49cf9bbd74e5_*.py`, `main.py` | 智能体模块：会话表 + 消息表（Alembic 迁移已执行）；会话管理、多轮对话（SSE 流式 + 非流式）、模型选择（请求 > 会话绑定 > 默认 LLM）、历史消息拼 messages 充当"记忆"、失败/中断也落库。流式生成器内部自建数据库会话（请求级会话在 SSE 开始前已被关闭）。复用 `app/utils/llm.py`（从 model_test 抽出的地址拼接与请求头） |
+| 2026-11-06 | 重构 | 公共工具 | `app/utils/llm.py`, `app/modules/model_config/services/model_test.py` | 把 OpenAI 兼容接口的 `chat/completions` 地址拼接与 Bearer 请求头抽成公共工具，model_test 改为复用，行为不变 |

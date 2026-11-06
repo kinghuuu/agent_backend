@@ -7,17 +7,11 @@ import httpx
 from app.core.logging import get_logger
 from app.modules.model_config.models import ModelConfig
 from app.modules.model_config.schemas import ModelTestResult
+from app.utils.llm import auth_headers, chat_completions_url
 
 logger = get_logger(__name__)
 
 # ---------- 模型连通性测试（OpenAI 兼容接口） ----------
-
-def _chat_url(base_url: str) -> str:
-    """拼接 chat/completions 地址，base_url 没带 /v1 时自动补上。"""
-    base = base_url.rstrip("/")
-    if not base.endswith("/v1") and "/v1/" not in base:
-        base = f"{base}/v1"
-    return f"{base}/chat/completions"
 
 
 async def _chat(
@@ -28,9 +22,6 @@ async def _chat(
     timeout: float = 30.0,
 ) -> dict:
     """调用 OpenAI 兼容的 chat/completions 接口并返回 JSON 响应。"""
-    headers = {"Content-Type": "application/json"}
-    if cfg.api_key:
-        headers["Authorization"] = f"Bearer {cfg.api_key}"
     payload = {
         "model": cfg.model_name,
         "messages": messages,
@@ -38,7 +29,11 @@ async def _chat(
         "stream": False,
     }
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(_chat_url(cfg.base_url), json=payload, headers=headers)
+        resp = await client.post(
+            chat_completions_url(cfg.base_url),
+            json=payload,
+            headers=auth_headers(cfg.api_key),
+        )
         resp.raise_for_status()
         return resp.json()
 
