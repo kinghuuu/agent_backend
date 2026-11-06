@@ -1,7 +1,7 @@
-"""模型管理模块的仓储层（原 crud，纯数据库操作，不含业务规则）。
+"""模型配置表的 crud（纯数据库操作，不含业务规则）。
 
 约定：第一个参数是 ``AsyncSession``；只做增删改查，不抛 HTTP 异常、不做校验。
-业务校验放在同模块的 ``service.py``。
+业务校验放在同模块的 ``services/model_config.py``。
 """
 
 from sqlalchemy import select

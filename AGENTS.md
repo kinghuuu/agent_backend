@@ -55,9 +55,9 @@ agent_backend/
 │  ├─ core/                 # 基础设施：config.py 配置、logging.py 日志、schemas.py 统一响应
 │  ├─ db/                   # base.py ORM基类/Mixin；session.py engine+会话；redis.py Redis客户端
 │  ├─ deps.py               # 依赖统一出口（get_db / get_redis），view 只从这里 import
-│  ├─ modules/              # ★ 业务模块：一个子目录 = 一个功能模块（含接口视图 view.py）
-│  │  ├─ model_config/      #    models / schemas / repository / service / view
-│  │  └─ system/            #    无表结构的模块可以只有 schemas / service / view
+│  ├─ modules/              # ★ 业务模块：一个子目录 = 一个功能模块
+│  │  ├─ model_config/      #    models/ schemas/ crud/ services/ views/（每个分层一个文件夹，内部按功能拆 .py）
+│  │  └─ system/            #    无表结构的模块可以只有 schemas/ services/ views/
 │  └─ utils/                # 与业务无关的纯工具函数
 ├─ alembic/                 # 迁移（env.py 为异步模板，自动读取 settings.DATABASE_URL）
 └─ docker-compose.yml / Dockerfile
@@ -69,11 +69,17 @@ agent_backend/
 | -------------------------- | --------------------------------------------------- |
 | `models.py`                | ORM 表结构                                          |
 | `schemas.py`               | Pydantic 请求/响应结构                              |
-| `repository.py`（原 crud） | 纯数据库读写，无业务规则，首参必须是 `AsyncSession` |
-| `service.py`               | 业务规则、外部调用，可组合本模块 repository         |
-| `view.py`                  | 接口视图：路由定义，只做参数校验 + 调 service + 包装响应 |
+| 分层目录 | 职责 |
+| --- | --- |
+| `models/` | ORM 表结构，一个功能一个文件（如 `model_config.py`），`__init__.py` 统一导出 |
+| `schemas/` | Pydantic 请求/响应结构，一个功能一个文件，`__init__.py` 统一导出 |
+| `crud/` | 纯数据库读写，无业务规则，首参必须是 `AsyncSession`；service 调用时带子模块名（`crud.model_config.get(...)`） |
+| `services/` | 业务规则、外部调用，可组合本模块 crud |
+| `views/` | 接口视图：路由定义，只做参数校验 + 调 service + 包装 `APIResponse`；`__init__.py` 聚合并声明本模块资源前缀 |
 
-**依赖方向（严禁反向）**：`view → service → repository → models`；跨模块只允许依赖对方 `service.py` 公开的能力，禁止直接摸别人的 `repository.py` / `models.py` / `view.py`；`db`/`core`/`deps` 为公共设施。
+路由统一在 `main.py` 的 `create_app()` 中挂载（`prefix = settings.API_V1_STR`），每个模块一行；资源前缀由模块自己的 `views/__init__.py` 声明。
+
+**依赖方向（严禁反向）**：`views → services → crud → models`；跨模块只允许依赖对方 `services/` 公开的能力，禁止直接摸别人的 `crud/` / `models/` / `views/`；`db`/`core`/`deps` 为公共设施。
 
 ## 4. 编码规范（Python）
 
@@ -81,7 +87,7 @@ agent_backend/
 2. **每个 `.py` 文件必须有模块级 docstring**，一句话说明文件职责。
 3. **所有公开函数/方法必须有 docstring**：一句话说明用途；参数/返回值不直观时补充说明；非显而易见的实现要写"为什么"，而不是复述"做了什么"。
 4. 类型注解：函数签名必须完整注解（`db: AsyncSession`、`-> ModelConfig` 等）。
-5. 视图层（`view.py`）规范：
+5. 视图层（`views/`）规范：
    - 统一返回 `APIResponse`（`{code, message, data}`），`code=0` 表示成功；错误用 HTTP 状态码表达
    - 业务校验失败由 service 抛 `ValueError`，view 捕获后转 `HTTPException(400)`
    - 资源不存在统一 `HTTPException(404)`
@@ -99,9 +105,9 @@ agent_backend/
 1. `app/modules/<模块>/models.py` 建模型 → 导入到 `app/modules/__init__.py`
 2. `alembic revision --autogenerate -m "add xxx"` → 检查生成的迁移脚本 → `alembic upgrade head`
 3. `app/modules/<模块>/schemas.py` 定义 Create / Update / Out
-4. `app/modules/<模块>/repository.py` 写数据库操作
-5. `app/modules/<模块>/service.py` 写业务规则（含对外部服务的调用）
-6. `app/modules/<模块>/view.py` 写接口视图 → 在 `main.py` 的 `create_app()` 中注册路由前缀
+4. `app/modules/<模块>/crud/<功能>.py` 写数据库操作
+5. `app/modules/<模块>/services/<功能>.py` 写业务规则（含对外部服务的调用）
+6. `app/modules/<模块>/views/<功能>.py` 写接口视图 → 在模块的 `views/__init__.py` 聚合并声明资源前缀 → 在 `main.py` 挂载一行
 
 完成前自查清单：
 
@@ -137,3 +143,4 @@ agent_backend/
 | 2026-11-05 | 清理 | 缓存文件  | 全仓 `__pycache__/`, `*.pyc`                                                                                                      | 清除 Python 字节码缓存（运行时自动重建）；确认保留 alembic/ 与 alembic_version 表（迁移能力必需）                                                                                                                                        |
 | 2026-11-05 | 文档 | 刷库流程  | `AGENTS.md` 第 2 节, `README.md`                                                                                                  | 将"改 models 后同步数据库"两步命令与注意点提升为高频操作章节                                                                                                                                                                             |
 | 2026-11-05 | 重构 | 视图归属  | `app/modules/*/view.py`, `main.py`                                                                                                | 接口视图从独立的 `app/views/` 下沉到各模块内 `view.py`，路由改在 `main.py` 的 `create_app()` 中注册；接口路径不变                                                                                                                        |
+| 2026-11-06 | 重构 | 模块内子包 | `app/modules/*/models/`, `schemas/`, `crud/`, `services/`, `views/` | 模块内单文件升级为分层子包：`repository` 改回 `crud`，各分层是文件夹、内部按功能拆多个 .py（model_config 已拆出 model_config / model_test 两个功能）；`views/__init__.py` 聚合路由并声明资源前缀；新增 `views/common.py` 提供 `get_model_or_404` 依赖。接口路径与表结构不变 |

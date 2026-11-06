@@ -20,8 +20,8 @@ from app.core.logging import setup_logging
 from app.core.schemas import APIResponse
 from app.db.redis import close_redis, init_redis
 from app.db.session import engine
-from app.modules.model_config.view import router as model_config_router
-from app.modules.system.view import router as system_router
+from app.modules.model_config.views import router as model_config_router
+from app.modules.system.views import router as system_router
 
 setup_logging(logging.DEBUG if settings.DEBUG else logging.INFO)
 logger = logging.getLogger(__name__)
@@ -81,9 +81,9 @@ def create_app() -> FastAPI:
     async def root():
         return APIResponse(data={"name": settings.PROJECT_NAME, "docs": "/docs"})
 
-    # 注册各模块的接口视图（新增模块在这里加一行，前缀 = /api/v1/<资源>）
-    app.include_router(system_router, prefix=f"{settings.API_V1_STR}/health")
-    app.include_router(model_config_router, prefix=f"{settings.API_V1_STR}/models")
+    # 注册各模块的接口视图（新增模块在这里加一行；资源前缀由模块的 views/__init__.py 自带）
+    app.include_router(system_router, prefix=settings.API_V1_STR)
+    app.include_router(model_config_router, prefix=settings.API_V1_STR)
     return app
 
 

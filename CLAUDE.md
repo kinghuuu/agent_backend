@@ -9,5 +9,5 @@
 1. 动手前先读 `AGENTS.md` 第 3、4 节（分层与编码规范），再读要改的模块。
 2. 改完代码后，无论改动多小，都要在 `AGENTS.md` 第 7 节「变更记录」追加一行。
 3. 涉及数据库结构变更时，必须先给出迁移脚本、再执行 `alembic upgrade head`，不要直接改库。
-4. 不要新建与本项目分层冲突的目录：一个功能模块 = `app/modules/<模块>/`（models / schemas / repository / service / view 全在里面），路由统一在 `main.py` 注册，不要把模块内文件拆到模块目录之外。
+4. 不要新建与本项目分层冲突的目录：一个功能模块 = `app/modules/<模块>/`，内部分层是子包（`models/` `schemas/` `crud/` `services/` `views/`，每个分层内按功能拆多个 .py），路由统一在 `main.py` 挂载、资源前缀在模块 `views/__init__.py` 声明。
 5. 输出给用户的说明用简体中文；代码注释同样用中文。

@@ -1,4 +1,4 @@
-"""模型管理模块的 ORM 模型。"""
+"""模型配置表的 ORM 模型。"""
 
 from sqlalchemy import Boolean, String, Text
 from sqlalchemy.orm import Mapped, mapped_column

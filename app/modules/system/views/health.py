@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.schemas import APIResponse
 from app.deps import get_db, get_redis
 from app.modules.system.schemas import HealthCheck
-from app.modules.system.service import check_health
+from app.modules.system.services.health import check_health
 
 router = APIRouter(tags=["系统"])
 

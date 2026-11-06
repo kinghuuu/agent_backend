@@ -11,9 +11,9 @@ agent_backend/
 │  ├─ core/                # 基础设施：配置(config.py)、日志(logging.py)、统一响应(schemas.py)
 │  ├─ db/                  # 数据库基础设施：ORM基类、engine/session、Redis 客户端
 │  ├─ deps.py              # 接口依赖统一出口（get_db / get_redis）
-│  ├─ modules/             # ★ 业务模块：一个子目录 = 一个功能模块（含接口视图 view.py）
-│  │  ├─ model_config/     #    模型管理：models / schemas / repository / service / view
-│  │  └─ system/           #    系统模块（健康检查）：schemas / service / view
+│  ├─ modules/             # ★ 业务模块：一个子目录 = 一个功能模块
+│  │  ├─ model_config/     #    模型管理：models/ schemas/ crud/ services/ views/（分层子包，内部按功能拆 .py）
+│  │  └─ system/           #    系统模块（健康检查）：schemas/ services/ views/
 │  └─ utils/               # 工具函数
 ├─ alembic/                # 数据库迁移
 ├─ docker-compose.yml      # postgres + redis + backend
@@ -60,10 +60,10 @@ alembic upgrade head                        # 2. 执行迁移，新表/新列立
   ```json
   { "code": 0, "message": "ok", "data": {} }
   ```
-- 接口层（`app/views/`）只做参数校验与转发；业务写在模块的 `service.py`，数据库读写写在模块的 `repository.py`。
+- 视图（`views/`）只做参数校验与转发；业务写在模块的 `services/`，数据库读写写在模块的 `crud/`。
 - 新增模块五步走（参考 `app/modules/model_config`）：
   1. `app/modules/<模块>/models.py` 建表模型，并在 `app/modules/__init__.py` 中导入
   2. `alembic revision --autogenerate -m "..."` + `alembic upgrade head`
   3. `app/modules/<模块>/schemas.py` 定义请求/响应结构
-  4. `app/modules/<模块>/repository.py` 写数据库操作 → `service.py` 写业务规则
-  5. `app/modules/<模块>/view.py` 写接口视图，并在 `main.py` 的 `create_app()` 中注册路由前缀
+  4. `app/modules/<模块>/crud/<功能>.py` 写数据库操作 → `services/<功能>.py` 写业务规则
+  5. `app/modules/<模块>/views/<功能>.py` 写接口视图，在模块 `views/__init__.py` 聚合并声明前缀，再在 `main.py` 挂载一行
