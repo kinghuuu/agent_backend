@@ -2,11 +2,11 @@
 
 from pydantic import BaseModel, Field
 
-from app.modules.agent.schemas.conversation import MessageOut
+from app.modules.chat.schemas.conversation import MessageOut
 
 
 class AvailableModelOut(BaseModel):
-    """智能体可选的模型（只暴露前端需要的字段，不含 base_url / api_key）。"""
+    """会话可选的模型（只暴露前端需要的字段，不含 base_url / api_key）。"""
 
     id: int
     name: str

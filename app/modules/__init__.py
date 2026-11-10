@@ -12,5 +12,5 @@
 注意：这里要导入各模块的 models，保证 Alembic autogenerate 能发现全部表。
 """
 
-from app.modules.agent import models  # noqa: F401
+from app.modules.chat import models  # noqa: F401
 from app.modules.model_config import models as model_config_models  # noqa: F401

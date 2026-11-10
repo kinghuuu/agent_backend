@@ -1,21 +1,21 @@
-"""智能体会话管理接口：/api/v1/agent/conversations。"""
+"""会话管理接口：/api/v1/chat/conversations。"""
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schemas import APIResponse
 from app.deps import get_db
-from app.modules.agent.models import AgentConversation
-from app.modules.agent.schemas import (
+from app.modules.chat.models import ChatConversation
+from app.modules.chat.schemas import (
     ConversationCreate,
     ConversationDetailOut,
     ConversationOut,
     ConversationUpdate,
 )
-from app.modules.agent.services import conversation as service
-from app.modules.agent.views.common import get_conversation_or_404
+from app.modules.chat.services import conversation as service
+from app.modules.chat.views.common import get_conversation_or_404
 
-router = APIRouter(tags=["智能体"])
+router = APIRouter(tags=["会话"])
 
 
 @router.get(
@@ -52,7 +52,7 @@ async def create_conversation(
     summary="会话详情（含消息）",
 )
 async def get_conversation(
-    obj: AgentConversation = Depends(get_conversation_or_404),
+    obj: ChatConversation = Depends(get_conversation_or_404),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[ConversationDetailOut]:
     """返回会话及其全部消息，前端切换会话时一次拿全。"""
@@ -67,7 +67,7 @@ async def get_conversation(
 )
 async def update_conversation(
     payload: ConversationUpdate,
-    obj: AgentConversation = Depends(get_conversation_or_404),
+    obj: ChatConversation = Depends(get_conversation_or_404),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[ConversationOut]:
     """只更新传入的字段（标题、绑定的模型）。"""
@@ -81,7 +81,7 @@ async def update_conversation(
     summary="删除会话",
 )
 async def delete_conversation(
-    obj: AgentConversation = Depends(get_conversation_or_404),
+    obj: ChatConversation = Depends(get_conversation_or_404),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[None]:
     """删除会话及其消息（前端有二次确认）。"""
@@ -95,7 +95,7 @@ async def delete_conversation(
     summary="清空会话消息",
 )
 async def clear_messages(
-    obj: AgentConversation = Depends(get_conversation_or_404),
+    obj: ChatConversation = Depends(get_conversation_or_404),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[dict]:
     """清空消息但保留会话（相当于"重新开始一段对话"）。"""

@@ -1,4 +1,4 @@
-"""智能体会话消息表的 ORM 模型。"""
+"""会话消息表的 ORM 模型。"""
 
 from typing import TYPE_CHECKING
 
@@ -8,21 +8,21 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin
 
 if TYPE_CHECKING:  # 仅类型检查时导入，避免模型间循环导入
-    from app.modules.agent.models.conversation import AgentConversation
+    from app.modules.chat.models.conversation import ChatConversation
 
 
-class AgentMessage(Base, TimestampMixin):
+class ChatMessage(Base, TimestampMixin):
     """会话中的一条消息（用户 / 助手）。
 
     这张表同时充当"对话记忆"：每次请求模型时，按 id 顺序取出本会话的历史消息，
     拼成 OpenAI 协议里的 messages 数组。
     """
 
-    __tablename__ = "agent_message"
+    __tablename__ = "chat_message"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, comment="主键")
     conversation_id: Mapped[int] = mapped_column(
-        ForeignKey("agent_conversation.id", ondelete="CASCADE"),
+        ForeignKey("chat_conversation.id", ondelete="CASCADE"),
         index=True,
         comment="所属会话 id",
     )
@@ -48,4 +48,4 @@ class AgentMessage(Base, TimestampMixin):
         Integer, default=None, comment="生成耗时（毫秒）"
     )
 
-    conversation: Mapped["AgentConversation"] = relationship(back_populates="messages")
+    conversation: Mapped["ChatConversation"] = relationship(back_populates="messages")

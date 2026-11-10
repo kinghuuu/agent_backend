@@ -1,4 +1,4 @@
-"""智能体对话接口：可选模型、发送消息（流式 / 非流式）。"""
+"""会话接口：可选模型、发送消息（流式 / 非流式）。"""
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -6,12 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schemas import APIResponse
 from app.deps import get_db
-from app.modules.agent.models import AgentConversation
-from app.modules.agent.schemas import AvailableModelOut, ChatRequest, ChatResult
-from app.modules.agent.services import chat as service
-from app.modules.agent.views.common import get_conversation_or_404
+from app.modules.chat.models import ChatConversation
+from app.modules.chat.schemas import AvailableModelOut, ChatRequest, ChatResult
+from app.modules.chat.services import chat as service
+from app.modules.chat.views.common import get_conversation_or_404
 
-router = APIRouter(tags=["智能体"])
+router = APIRouter(tags=["会话"])
 
 # 流式响应的公共响应头：
 # - text/event-stream：SSE 标准 MIME
@@ -26,9 +26,9 @@ SSE_HEADERS = {
 @router.get(
     "/models",
     response_model=APIResponse[list[AvailableModelOut]],
-    summary="智能体可用模型",
+    summary="会话可用模型",
 )
-async def list_agent_models(
+async def list_chat_models(
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[list[AvailableModelOut]]:
     """返回启用中的 LLM 模型（默认模型在前），供前端模型下拉框使用。"""
@@ -49,7 +49,7 @@ async def list_agent_models(
 )
 async def chat(
     payload: ChatRequest,
-    conversation: AgentConversation = Depends(get_conversation_or_404),
+    conversation: ChatConversation = Depends(get_conversation_or_404),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[ChatResult]:
     """发送一条用户消息并等待完整回复（调试 / 不支持流式的客户端用）。"""
@@ -70,7 +70,7 @@ async def chat(
 )
 async def chat_stream(
     payload: ChatRequest,
-    conversation: AgentConversation = Depends(get_conversation_or_404),
+    conversation: ChatConversation = Depends(get_conversation_or_404),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """流式对话：返回 ``text/event-stream``，每个事件是一个 ``data: {json}`` 块。

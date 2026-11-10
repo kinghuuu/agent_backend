@@ -16,7 +16,7 @@
 | --------------- | ---------------- | -------------------------------------------------------- |
 | 系统 / 健康检查 | `/api/v1/health` | 应用、PostgreSQL、Redis 连通状态                         |
 | 模型管理        | `/api/v1/models` | LLM / Embedding / Rerank 配置 CRUD、连通测试、上下文测试 |
-| 智能体          | `/api/v1/agent`  | 会话管理（新建 / 重命名 / 删除 / 清空）、多轮对话（流式 SSE + 非流式）、可用模型列表 |
+| 会话            | `/api/v1/chat`   | 会话管理（新建 / 重命名 / 删除 / 清空）、多轮对话（流式 SSE + 非流式）、可用模型列表 |
 
 ## 2. 启动与常用命令
 
@@ -46,6 +46,14 @@ python main.py                      # 本地启动（读 .env 的 HOST/PORT，DE
 uvicorn main:app --reload --port 15401
 docker compose logs backend -f      # 查看后端日志
 ```
+
+### 不要生成 __pycache__（用户明确要求）
+
+仓库里不允许出现 `__pycache__` / `.pyc`：
+- 用户环境已设 `PYTHONDONTWRITEBYTECODE=1`（`setx`，新进程生效）
+- `.venv/Lib/site-packages/sitecustomize.py` 里设了 `sys.dont_write_bytecode = True`，用这个 venv 跑的任何进程都不会写缓存
+- 用其它 Python 跑脚本时自己带上 `PYTHONDONTWRITEBYTECODE=1`；收尾时若发现缓存目录，直接删掉（`.venv` 内的不用管）
+
 
 ## 3. 目录结构与分层约定
 
@@ -147,3 +155,4 @@ agent_backend/
 | 2026-11-06 | 重构 | 模块内子包 | `app/modules/*/models/`, `schemas/`, `crud/`, `services/`, `views/` | 模块内单文件升级为分层子包：`repository` 改回 `crud`，各分层是文件夹、内部按功能拆多个 .py（model_config 已拆出 model_config / model_test 两个功能）；`views/__init__.py` 聚合路由并声明资源前缀；新增 `views/common.py` 提供 `get_model_or_404` 依赖。接口路径与表结构不变 |
 | 2026-11-06 | 新增 | 智能体 | `app/modules/agent/**`, `app/utils/llm.py`, `alembic/versions/49cf9bbd74e5_*.py`, `main.py` | 智能体模块：会话表 + 消息表（Alembic 迁移已执行）；会话管理、多轮对话（SSE 流式 + 非流式）、模型选择（请求 > 会话绑定 > 默认 LLM）、历史消息拼 messages 充当"记忆"、失败/中断也落库。流式生成器内部自建数据库会话（请求级会话在 SSE 开始前已被关闭）。复用 `app/utils/llm.py`（从 model_test 抽出的地址拼接与请求头） |
 | 2026-11-06 | 重构 | 公共工具 | `app/utils/llm.py`, `app/modules/model_config/services/model_test.py` | 把 OpenAI 兼容接口的 `chat/completions` 地址拼接与 Bearer 请求头抽成公共工具，model_test 改为复用，行为不变 |
+| 2026-11-10 | 重命名 | 会话模块 | `app/modules/chat/**`（原 agent）, `alembic/versions/7648f48cf840_*.py`, `main.py` | 模块 agent → chat（原「智能体」只是会话功能，名字留给后续真正的智能体配置）：目录 / 类名（ChatConversation / ChatMessage）/ 接口前缀 `/api/v1/chat` 全部更名；两张表经迁移重命名为 `chat_conversation` / `chat_message`（索引、约束、序列同步改名，数据原样保留）；历史迁移 49cf9bbd74e5 不改写 |

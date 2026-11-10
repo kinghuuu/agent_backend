@@ -1,7 +1,7 @@
-"""智能体对话的业务层：模型选择、历史消息组装、模型调用与消息落库。
+"""对话的业务层：模型选择、历史消息组装、模型调用与消息落库。
 
 学习要点：
-1. **记忆**：每次请求都从 ``agent_message`` 表取出本会话的历史，拼成 OpenAI 协议的
+1. **记忆**：每次请求都从 ``chat_message`` 表取出本会话的历史，拼成 OpenAI 协议的
    ``messages`` 数组发给模型——这就是最朴素的"多轮对话记忆"，靠数据库而非内存维持。
 2. **流式**：用 SSE（``text/event-stream``）把 token 一片片推给前端，首字延迟低；
    协议上是若干个 ``data: {json}\\n\\n`` 事件块，前端按 ``type`` 字段区分处理。
@@ -20,10 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.session import SessionLocal
-from app.modules.agent.crud import conversation as conversation_crud
-from app.modules.agent.crud import message as message_crud
-from app.modules.agent.models import AgentConversation, AgentMessage
-from app.modules.agent.schemas import ChatRequest, ChatResult, MessageOut
+from app.modules.chat.crud import conversation as conversation_crud
+from app.modules.chat.crud import message as message_crud
+from app.modules.chat.models import ChatConversation, ChatMessage
+from app.modules.chat.schemas import ChatRequest, ChatResult, MessageOut
 from app.modules.model_config.models import ModelConfig
 from app.modules.model_config.services import model_config as model_service
 from app.utils.llm import auth_headers, chat_completions_url
@@ -53,7 +53,7 @@ class ChatError(Exception):
 
 
 async def list_available_models(db: AsyncSession) -> list[ModelConfig]:
-    """智能体可选的模型：仅启用中的 LLM，默认模型排最前。"""
+    """会话可选的模型：仅启用中的 LLM，默认模型排最前。"""
     items = await model_service.list_model_configs(db, "llm")
     enabled = [item for item in items if item.enabled]
     return sorted(enabled, key=lambda item: (not item.is_default, item.id))
@@ -61,7 +61,7 @@ async def list_available_models(db: AsyncSession) -> list[ModelConfig]:
 
 async def resolve_model(
     db: AsyncSession,
-    conversation: AgentConversation,
+    conversation: ChatConversation,
     model_config_id: int | None = None,
 ) -> ModelConfig:
     """确定本次对话使用的模型。
@@ -84,7 +84,7 @@ async def resolve_model(
 
 
 def _build_llm_messages(
-    history: list[AgentMessage], system_prompt: str | None
+    history: list[ChatMessage], system_prompt: str | None
 ) -> list[dict[str, str]]:
     """把数据库里的历史消息转成 OpenAI 协议的 messages 数组。
 
@@ -110,10 +110,10 @@ def _auto_title(content: str) -> str:
 
 async def _prepare(
     db: AsyncSession,
-    conversation: AgentConversation,
+    conversation: ChatConversation,
     payload: ChatRequest,
     cfg: ModelConfig,
-) -> tuple[AgentMessage, list[dict[str, str]]]:
+) -> tuple[ChatMessage, list[dict[str, str]]]:
     """落库用户消息 → 自动命名会话 → 组装本次请求的 messages。"""
     history = await message_crud.list_by_conversation(db, conversation.id)
     user_message = await message_crud.create(
@@ -143,14 +143,14 @@ async def _prepare(
 
 async def _save_assistant(
     db: AsyncSession,
-    conversation: AgentConversation,
+    conversation: ChatConversation,
     content: str,
     status: str,
     *,
     error_message: str | None = None,
     usage: dict | None = None,
     latency_ms: int | None = None,
-) -> AgentMessage:
+) -> ChatMessage:
     """保存助手消息（成功 / 失败 / 中断三种状态共用），并刷新会话的更新时间。"""
     data: dict[str, Any] = {
         "conversation_id": conversation.id,
@@ -234,7 +234,7 @@ def _parse_sse_line(line: str) -> dict | None:
 
 async def chat(
     db: AsyncSession,
-    conversation: AgentConversation,
+    conversation: ChatConversation,
     payload: ChatRequest,
     cfg: ModelConfig,
 ) -> ChatResult:
@@ -369,7 +369,7 @@ async def stream_chat(
         except Exception as exc:  # noqa: BLE001 - 统一转成 SSE error 事件
             message = str(exc) if isinstance(exc, ChatError) else f"调用模型失败：{exc}"
             logger.warning("流式对话失败：%s", message, exc_info=True)
-            saved: AgentMessage | None = None
+            saved: ChatMessage | None = None
             try:
                 saved = await _save_assistant(
                     db,

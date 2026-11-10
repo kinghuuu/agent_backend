@@ -1,4 +1,4 @@
-"""智能体会话表的 ORM 模型。"""
+"""会话表的 ORM 模型。"""
 
 from typing import TYPE_CHECKING
 
@@ -8,13 +8,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin
 
 if TYPE_CHECKING:  # 仅类型检查时导入，避免模型间循环导入
-    from app.modules.agent.models.message import AgentMessage
+    from app.modules.chat.models.message import ChatMessage
 
 
-class AgentConversation(Base, TimestampMixin):
-    """一次多轮对话（一个会话 = 一条记录，消息存在 agent_message 表）。"""
+class ChatConversation(Base, TimestampMixin):
+    """一次多轮对话（一个会话 = 一条记录，消息存在 chat_message 表）。"""
 
-    __tablename__ = "agent_conversation"
+    __tablename__ = "chat_conversation"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, comment="主键")
     title: Mapped[str] = mapped_column(
@@ -28,9 +28,9 @@ class AgentConversation(Base, TimestampMixin):
 
     # passive_deletes=True：删除会话时交给数据库的 ON DELETE CASCADE 处理，
     # 避免 ORM 先把成百上千条消息读进内存再逐条删除。
-    messages: Mapped[list["AgentMessage"]] = relationship(
+    messages: Mapped[list["ChatMessage"]] = relationship(
         back_populates="conversation",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        order_by="AgentMessage.id",
+        order_by="ChatMessage.id",
     )
