@@ -22,6 +22,7 @@ from app.db.redis import close_redis, init_redis
 from app.db.session import engine
 from app.modules.chat.views import router as chat_router
 from app.modules.model_config.views import router as model_config_router
+from app.modules.study.views import router as study_router
 from app.modules.system.views import router as system_router
 
 setup_logging(logging.DEBUG if settings.DEBUG else logging.INFO)
@@ -86,6 +87,7 @@ def create_app() -> FastAPI:
     app.include_router(system_router, prefix=settings.API_V1_STR)
     app.include_router(model_config_router, prefix=settings.API_V1_STR)
     app.include_router(chat_router, prefix=settings.API_V1_STR)
+    app.include_router(study_router, prefix=settings.API_V1_STR)
     return app
 
 
