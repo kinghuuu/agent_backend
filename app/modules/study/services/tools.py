@@ -8,6 +8,7 @@
 4. 工具函数永远返回字符串——模型能读的只有文本。
 """
 
+import json
 import math
 from datetime import datetime
 from typing import Any, Callable
@@ -44,12 +45,30 @@ def current_time() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
 
 
+def search_news(keyword: str) -> str:
+    """按关键词搜索新闻，返回 3 条假新闻标题（Day 01 练习 1：加一个工具）。
+
+    重点是让模型学会"遇到新闻类问题先检索再回答"——description 里写明了
+    何时必须调用、禁止凭训练记忆编造新闻，返回值用 JSON 字符串方便模型引用。
+    """
+    # 练习数据：不管什么关键词都返回这三条，跑通"检索 → 引用 → 总结"的流程即可
+    return json.dumps(
+        [
+            {"title": f"{keyword}行业发布全新技术标准，产业链公司集体受益", "date": "2026-11-10"},
+            {"title": f"专家解读：{keyword}成为今年增长最快的赛道之一", "date": "2026-11-09"},
+            {"title": f"多家巨头宣布加码{keyword}领域，投资规模创新高", "date": "2026-11-08"},
+        ],
+        ensure_ascii=False,
+    )
+
+
 # ---------- 2. 工具注册表：名字 -> 可执行函数（Executor 的"查表执行"就靠它） ----------
 
 TOOLS: dict[str, Callable[..., str]] = {
     "get_weather": get_weather,
     "calculator": calculator,
     "current_time": current_time,
+    "search_news": search_news,
 }
 
 # ---------- 3. 工具说明书：随请求发给模型的 JSON Schema ----------
@@ -101,6 +120,27 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "name": "current_time",
             "description": "获取当前日期和时间。用户问'现在几点''今天几号'时必须调用。",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_news",
+            "description": (
+                "按关键词搜索新闻，返回 3 条最新新闻标题和日期。"
+                "当用户想了解某个关键词、话题、行业或公司的新闻动态时，"
+                "必须调用本工具进行检索，禁止凭训练记忆编造新闻。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "新闻检索关键词，例如 人工智能、新能源。提取用户问题中的核心词即可，不要整句传入。",
+                    }
+                },
+                "required": ["keyword"],
+            },
         },
     },
 ]
