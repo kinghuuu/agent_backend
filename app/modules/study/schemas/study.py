@@ -67,6 +67,13 @@ class ReactRunRequest(BaseModel):
     question: str = Field(min_length=1, description="用户问题")
     max_steps: int = Field(default=6, ge=1, le=12, description="最大循环步数")
     model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+    session_id: str | None = Field(
+        default=None,
+        description=(
+            "会话 ID：多次请求传同一个 ID 可保留 history 实现'接着上一句继续问'；"
+            "不传则后端自动新建会话（返回值里会给出 ID，可拿它继续追问）"
+        ),
+    )
 
 
 class ReactRunResult(BaseModel):
@@ -76,3 +83,6 @@ class ReactRunResult(BaseModel):
     final_answer: str
     stopped_by_limit: bool
     model: str
+    session_id: str = Field(description="本次会话 ID，下次请求带上即可继续追问")
+    history: str = Field(description="该会话累计的纯文本记忆（用户问题 + 模型输出 + Observation）")
+    turns: int = Field(description="该会话已完成的提问轮数")
