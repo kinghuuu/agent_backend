@@ -181,6 +181,8 @@ def _make_json_schema_fetch(client: Any, model: str, messages: list[dict[str, An
         note, degraded_note = degraded_note, None
         return resp.choices[0].message.content or "", "json_object", note
 
+    return fetch
+
 
 async def run(db: AsyncSession, payload: ExtractRunRequest) -> dict[str, Any]:
     """运行一次意图抽取实验，返回尝试轨迹与最终工单（views 调用的入口）。"""
