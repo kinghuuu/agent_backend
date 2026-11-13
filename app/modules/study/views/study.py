@@ -1,6 +1,6 @@
-"""智能体开发学习接口：工具清单、Function Calling Agent 循环、手写 ReAct 循环。
+"""智能体开发学习接口：工具清单、Function Calling Agent 循环、手写 ReAct 循环、结构化输出实验。
 
-三个接口都没有落库行为——学习页是"试验台"，跑完即走，不产生会话数据。
+所有接口都没有落库行为——学习页是"试验台"，跑完即走，不产生会话数据。
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,11 +11,13 @@ from app.deps import get_db
 from app.modules.study.schemas.study import (
     AgentRunRequest,
     AgentRunResult,
+    ExtractRunRequest,
+    ExtractRunResult,
     ReactRunRequest,
     ReactRunResult,
     ToolOut,
 )
-from app.modules.study.services import agent_loop, react_loop
+from app.modules.study.services import agent_loop, react_loop, structured_extract
 from app.modules.study.services.tools import TOOL_SCHEMAS
 
 router = APIRouter(tags=["智能体开发学习"])
@@ -70,6 +72,29 @@ async def run_react(
     """不借助 Function Calling，用纯文本协议跑 ReAct 循环，返回每一步原文与观察结果。"""
     try:
         result = await react_loop.run(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/extract/run",
+    response_model=APIResponse[ExtractRunResult],
+    summary="Day 02 结构化输出实验：客户意图提取（三级方案）",
+)
+async def run_extract(
+    payload: ExtractRunRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[ExtractRunResult]:
+    """按选定方案抽取工单：口头要求（反面教材）/ JSON Mode / Pydantic Schema。
+
+    返回每次尝试的轨迹（原文、报错、降级说明）——直观对比三级方案
+    "谁保证合法 JSON、谁保证字段类型"，并展示失败现场回填重试的效果。
+    """
+    try:
+        result = await structured_extract.run(db, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001

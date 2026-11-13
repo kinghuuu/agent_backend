@@ -4,7 +4,7 @@
 前端把轨迹渲染成时间线，才能可视化地观察模型每一轮"决策 → 调工具 → 观察"的过程。
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -86,3 +86,43 @@ class ReactRunResult(BaseModel):
     session_id: str = Field(description="本次会话 ID，下次请求带上即可继续追问")
     history: str = Field(description="该会话累计的纯文本记忆（用户问题 + 模型输出 + Observation）")
     turns: int = Field(description="该会话已完成的提问轮数")
+
+
+class ExtractAttemptTrace(BaseModel):
+    """结构化抽取的一次尝试：模型原文、解析结果、失败原因、本轮实际使用的输出约束。"""
+
+    attempt: int
+    raw_content: str = Field(description="模型本轮输出的原文")
+    parsed: dict[str, Any] | None = Field(default=None, description="解析/校验通过的结果")
+    error: str | None = Field(default=None, description="解析或 Schema 校验失败的原因（会回填给模型重试）")
+    response_format: str = Field(
+        description="本轮实际使用的输出约束：none（口头要求）/ json_object / json_schema"
+    )
+    note: str | None = Field(default=None, description="降级/兜底说明（如服务不支持 json_schema 自动降级）")
+
+
+class ExtractRunRequest(BaseModel):
+    """Day 02 结构化输出实验请求：客户意图提取。"""
+
+    text: str = Field(min_length=1, description="待抽取的用户原话")
+    mode: Literal["naive", "json_mode", "json_schema"] = Field(
+        default="json_schema",
+        description="三级方案：naive 口头要求（反面教材）/ json_mode JSON Mode / json_schema Pydantic Schema",
+    )
+    max_retries: int = Field(
+        default=2, ge=0, le=3,
+        description="解析失败后带错误现场重试的次数（naive 模式是反面教材，固定不重试）",
+    )
+    model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+
+
+class ExtractRunResult(BaseModel):
+    """结构化抽取结果：尝试轨迹 + 最终工单。"""
+
+    mode: str = Field(description="本次使用的抽取方案")
+    attempts: list[ExtractAttemptTrace] = Field(description="每次尝试的轨迹（含失败现场）")
+    ticket: dict[str, Any] | None = Field(
+        default=None, description="最终通过校验的工单；连续失败时为 null，绝不编造"
+    )
+    success: bool = Field(description="是否成功拿到通过校验的工单")
+    model: str = Field(description="实际使用的模型名")

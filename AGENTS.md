@@ -17,7 +17,7 @@
 | 系统 / 健康检查 | `/api/v1/health` | 应用、PostgreSQL、Redis 连通状态                         |
 | 模型管理        | `/api/v1/models` | LLM / Embedding / Rerank 配置 CRUD、连通测试、上下文测试 |
 | 会话            | `/api/v1/chat`   | 会话管理（新建 / 重命名 / 删除 / 清空）、多轮对话（流式 SSE + 非流式）、可用模型列表 |
-| 智能体开发学习  | `/api/v1/study`  | Day 01 实验台：工具清单（含 JSON Schema）、Function Calling Agent 循环、手写 ReAct 文本协议循环（均返回结构化执行轨迹，无落库） |
+| 智能体开发学习  | `/api/v1/study`  | Day 01–02 实验台：工具清单（含 JSON Schema）、Function Calling Agent 循环、手写 ReAct 文本协议循环、结构化输出实验（三级方案对比，均返回结构化执行轨迹，无落库） |
 
 ## 2. 启动与常用命令
 
@@ -160,3 +160,5 @@ agent_backend/
 | 2026-11-11 | 新增 | 学习实验台 | `app/modules/study/**`, `main.py` | 智能体开发学习模块：把 `scratch/day01` 的工具定义、Function Calling 循环、手写 ReAct 协议工程化（无表结构，只有 schemas/services/views 三层）；循环不再 print，返回结构化执行轨迹；模型接入复用「模型管理」默认 LLM（openai SDK 异步客户端，base_url 自动补 /v1）；接口 `/tools` `/agent/run` `/react/run`。配套前端 `/study` 页 |
 | 2026-11-11 | 新增 | 学习工具  | `app/modules/study/services/tools.py` | Day 01 练习 1：新增 `search_news` 工具（按关键词返回 3 条假新闻标题），同步注册进 `TOOLS` / `TOOL_SCHEMAS`；description 写明"新闻类问题必须调用、禁止凭记忆编造"。Function Calling 与 ReAct 两个循环共用工具表，无需改循环代码 |
 | 2026-11-12 | 修改 | ReAct 多轮 | `app/modules/study/services/react_loop.py`, `app/modules/study/schemas/study.py` | Day 01 练习 3：ReAct 循环支持多轮对话——history 由 run 函数局部变量提成 `ReactAgent` 实例成员，新增 `ReactSessionManager` 内存注册表（session_id → 实例，上限 50 插入序淘汰，重启即清空）；`/react/run` 请求新增可选 `session_id`，返回值新增 `session_id` / `history` / `turns`；每轮把「用户问题 + 模型输出 + Observation」并入跨轮记忆随 prompt 重发，模型可理解"那上海呢"式追问。views 无需改动（run 签名不变） |
+| 2026-11-13 | 新增 | 学习·结构化输出 | `app/modules/study/services/structured_extract.py`, `app/modules/study/schemas/study.py`, `app/modules/study/views/study.py` | Day 02：新增结构化输出实验接口 `/extract/run`（客户意图提取器，三级方案对比——口头要求反面教材 / JSON Mode / Pydantic Schema 合同），解析与校验失败时把"错误现场"回填进 messages 重试；练习 1（intent 6 类枚举）练习 2（嵌套 items）练习 3（通用 `retry_until_valid`）全部落实；`json_schema` 严格约束遇 400 自动降级 json_object 并记入轨迹；意图枚举取值单点定义（`INTENT_VALUES`），Schema prompt 与 Pydantic 模型同源 |
+| 2026-11-13 | 修改 | 学习·Prompt 四段式 | `app/modules/study/services/agent_loop.py` | Day 02：Agent 循环的 SYSTEM_PROMPT 按"角色/规则/输出格式/示例"四段式模板重写，规则编号化可逐条测试（为 Day 16 评估体系铺路），内容语义与原版一致 |
