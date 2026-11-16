@@ -55,13 +55,16 @@ def tool(
     args_model: type[BaseModel],
     side_effect: Literal["read", "write", "destructive"] = "read",
     require_confirm: bool = False,
+    repeatable: bool = False,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """把一个函数注册成模型可见的工具。
 
     - ``args_model``：参数合同（唯一真相源）——Schema 发给模型，校验留给 dispatch；
     - ``side_effect``：副作用分级，dispatch 据此统一施加重试/确认策略；
     - ``require_confirm``：True 时执行前必须经过用户确认（安全边界落在代码，
-      不能落在提示词里——提示词模型有概率直接忽略）。
+      不能落在提示词里——提示词模型有概率直接忽略）；
+    - ``repeatable``：Day 05 轮询白名单——轮询类工具（查任务状态）天然要重复调用，
+      终止逻辑对它不加"重复动作"计数，改为指数退避。
     """
     def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
         REGISTRY[fn.__name__] = {
@@ -69,6 +72,7 @@ def tool(
             "args_model": args_model,
             "side_effect": side_effect,
             "require_confirm": require_confirm,
+            "repeatable": repeatable,
             "spec": {
                 "type": "function",
                 "function": {
@@ -188,6 +192,23 @@ class CreateRefundArgs(BaseModel):
     reason: str = Field(..., min_length=4, max_length=100, description="退款原因，至少 4 个字")
 
 
+class CreateExportArgs(BaseModel):
+    """create_export 的参数合同（异步任务：先拿到 task_id，再轮询状态）。"""
+
+    month: str = Field(..., pattern=r"^\d{4}-\d{2}$", description="导出月份 YYYY-MM，例如 2026-10")
+    export_type: Literal["orders", "refunds"] = Field(
+        "orders", description="导出内容类型，默认 orders（订单）"
+    )
+
+
+class TaskStatusArgs(BaseModel):
+    """get_task_status 的参数合同（Day 05 轮询白名单演示）。"""
+
+    task_id: str = Field(
+        ..., pattern=r"^T\d{4}$", description="导出任务 ID，T 开头加 4 位数字，例如 T8821"
+    )
+
+
 # ============================================================
 # 3. 演示数据与工具实现（返回 dict，由 dispatch 统一包成 {ok, data}）
 # ============================================================
@@ -203,6 +224,12 @@ _ORDERS_DB: dict[str, list[dict[str, Any]]] = {
 
 # 练习 3：退款幂等台账 key → 上次退款结果（学习项目存内存，重启即清）
 _REFUND_LEDGER: dict[str, dict[str, Any]] = {}
+
+# Day 05：异步导出任务（轮询场景演示）——task_id → 状态。
+# 每次轮询 polls+1，第 3 次返回 done，模拟"轮询到状态变化才算进展"
+_EXPORT_TASKS: dict[str, dict[str, Any]] = {}
+_EXPORT_SEQ = 8820
+_EXPORT_TOTAL_POLLS = 3
 
 
 def _idempotency_key(parsed: CreateRefundArgs) -> str:
@@ -317,7 +344,12 @@ def search_orders(
     total = len(rows)
     rows = rows[:limit]
     # total + returned 让模型知道"还有更多"，空结果用语义化的 total=0 表达
-    return {"total": total, "returned": len(rows), "orders": rows}
+    payload: dict[str, Any] = {"total": total, "returned": len(rows), "orders": rows}
+    if total == 0:
+        # Day 05 接缝：空结果是合法信息，不是错误。显式写清含义，
+        # 模型才不会把"查法不对"和"确实没有"混为一谈、换写法反复重查
+        payload["hint"] = "该用户确实没有符合条件的订单，换查询条件不会变多，请如实告知用户"
+    return payload
 
 
 @tool(CreateRefundArgs, side_effect="write", require_confirm=True)
@@ -344,6 +376,58 @@ def create_refund(order_id: str, amount: float, reason: str) -> dict[str, Any]:
     return refund
 
 
+@tool(CreateExportArgs, side_effect="write")
+def create_export(month: str, export_type: str = "orders") -> dict[str, Any]:
+    """创建一个订单/退款数据的异步导出任务，立即返回任务 ID。
+
+    何时用：用户要求"导出报表""下载明细""把订单打包发我"时。
+    何时不用：用户只是想看几条订单——直接用 search_orders 查出来回答即可。
+    返回：{task_id, status:"running"}；拿到 task_id 后必须用 get_task_status
+         轮询，status=done 时才有下载地址，不要自己编 URL。
+    """
+    global _EXPORT_SEQ
+    _EXPORT_SEQ += 1
+    task_id = f"T{_EXPORT_SEQ}"
+    _EXPORT_TASKS[task_id] = {
+        "task_id": task_id,
+        "month": month,
+        "type": export_type,
+        "polls": 0,
+        "status": "running",
+    }
+    return {"task_id": task_id, "status": "running", "month": month, "type": export_type}
+
+
+@tool(TaskStatusArgs, side_effect="read", repeatable=True)
+def get_task_status(task_id: str) -> dict[str, Any]:
+    """查询导出任务的进度（轮询接口：任务没完成时需要重复调用）。
+
+    何时用：拿到 create_export 返回的 task_id 后查询进度，直到 status=done。
+    何时不用：没有 task_id 时不要调用；用户问别的事情时不要调用。
+    返回：{task_id, status, progress}；status=running 表示还在处理，可以稍后再查；
+         status=done 时额外返回 url，此时应把下载链接给用户。
+    """
+    task = _EXPORT_TASKS.get(task_id)
+    if task is None:
+        # 抛 ValueError → dispatch 走 business_rule 通道，模型会看到可纠正的提示
+        raise ValueError(f"导出任务 {task_id} 不存在，请先用 create_export 创建任务")
+    task["polls"] += 1
+    # 前两次轮询 running，第三次 done——结果指纹随之变化，才算"有进展"
+    if task["polls"] >= _EXPORT_TOTAL_POLLS:
+        task["status"] = "done"
+        return {
+            "task_id": task_id,
+            "status": "done",
+            "progress": 100,
+            "url": f"https://static.example.com/exports/{task_id}.xlsx",
+        }
+    return {
+        "task_id": task_id,
+        "status": "running",
+        "progress": round(task["polls"] / _EXPORT_TOTAL_POLLS * 100),
+    }
+
+
 # ============================================================
 # 4. 兼容别名：react_loop 与 /tools 接口仍按旧名字取清单和原始函数
 # ============================================================
@@ -357,6 +441,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [entry["spec"] for entry in REGISTRY.values
 def tool_specs() -> list[dict[str, Any]]:
     """给 API 的 tools 参数（与 TOOL_SCHEMAS 等价，语义化名字）。"""
     return TOOL_SCHEMAS
+
+
+def repeatable_tool_names() -> list[str]:
+    """Day 05 轮询白名单：这些工具的重复调用不算"重复动作"，改为指数退避。"""
+    return [name for name, entry in REGISTRY.items() if entry["repeatable"]]
 
 
 # ============================================================

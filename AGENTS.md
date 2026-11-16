@@ -17,7 +17,7 @@
 | 系统 / 健康检查 | `/api/v1/health` | 应用、PostgreSQL、Redis 连通状态                         |
 | 模型管理        | `/api/v1/models` | LLM / Embedding / Rerank 配置 CRUD、连通测试、上下文测试 |
 | 会话            | `/api/v1/chat`   | 会话管理（新建 / 重命名 / 删除 / 清空）、多轮对话（流式 SSE + 非流式）、可用模型列表 |
-| 智能体开发学习  | `/api/v1/study`  | Day 01–04 实验台：工具清单（Pydantic 自动生成 Schema + 副作用分级）、说明书预算、工具调用日志、Function Calling Agent 循环（并行多工具 + self-heal 观测 + 自愈上限熔断 + 资金操作确认门）、手写 ReAct 循环、结构化输出实验（均返回结构化轨迹，无落库） |
+| 智能体开发学习  | `/api/v1/study`  | Day 01–05 实验台：工具清单（Pydantic 自动生成 Schema + 副作用/轮询分级）、说明书预算、工具调用日志、Function Calling Agent 循环（并行多工具、self-heal、四层终止：语义/结构/资源/结果校验 + 强制收敛降级交付）、手写 ReAct 循环、结构化输出实验（均返回结构化轨迹，无落库） |
 
 ## 2. 启动与常用命令
 
@@ -46,6 +46,7 @@ docker compose up -d postgres redis # 只起依赖，本地跑后端
 python main.py                      # 本地启动（读 .env 的 HOST/PORT，DEBUG=true 时热重载）
 uvicorn main:app --reload --port 15401
 docker compose logs backend -f      # 查看后端日志
+python -m pytest tests/ -p no:cacheprovider -q   # 单测（纯逻辑，不依赖 DB / 模型；-p 关缓存避免 .pytest_cache）
 ```
 
 ### 不要生成 __pycache__（用户明确要求）
@@ -165,3 +166,4 @@ agent_backend/
 | 2026-11-13 | 修复 | 学习·结构化输出 | `app/modules/study/services/structured_extract.py` | `/extract/run` json_schema 模式报 "'NoneType' object is not callable"：`_make_json_schema_fetch` 定义闭包后漏写 `return fetch`，函数返回 None 被当作 fetch 调用；补上 return 并验证 |
 | 2026-11-13 | 新增 | 学习·多工具调度 | `app/modules/study/services/tools.py`, `app/modules/study/services/agent_loop.py`, `app/modules/study/views/study.py`, `app/modules/study/schemas/study.py` | Day 03：新增统一分发器 `dispatch`（解析参数 → 查表调用 → 错误以 `{"error": ...}` JSON 返回的 self-heal 契约，主循环不再自己 try/except）；`get_weather` 加 `unit` 枚举参数（摄氏/华氏换算，演示串行依赖调度）并补杭州假数据；`calculator` 加字符白名单校验层（练习 1，eval 前拦截白名单外标识符）；新增工具调用日志 `TOOL_CALL_LOG`（内存 deque 200 条：时间/工具/参数/耗时/是否报错）与接口 `GET /tools/calls`（练习 2）；主循环轨迹新增 `duration_ms` / `is_error`，上一轮报错的工具本轮被再次调用时标 `self_heal`（练习 3，供 Day 05 重试策略分析） |
 | 2026-11-16 | 重构 | 学习·工具设计 | `app/modules/study/services/tools.py`, `app/modules/study/services/agent_loop.py`, `app/modules/study/schemas/study.py`, `app/modules/study/views/study.py` | Day 04：工具层重构为 `@tool` 注册器——Pydantic 参数模型为唯一真相源（一份模型产出 JSON Schema + 运行时校验，不再手写 Schema，title 自动剥离），description 全部改为四段式（做什么/何时用/何时不用/返回什么）；`dispatch` 升级为三层校验流水线（JSON 解析 → Schema 校验 → 业务规则 → 副作用确认门 → 执行），错误统一为 `{ok, error_type, message, hint, errors:[{field,why,got}]}` 结构化契约，执行传入的是校验清洗后的 `model_dump()` 参数；新增电商演示工具 `search_orders`（pattern/枚举/边界收窄 + 练习 1 日期范围 model_validator）与 `create_refund`（write 副作用 + require_confirm 确认门 + 练习 3 幂等键，重复调用返回 `duplicate: true`）；练习 2 `spec_budget()` 与接口 `GET /tools/budget`（说明书总字符数，超 2000 警告）；`/tools` 响应新增 side_effect / require_confirm 元数据；主循环：错误契约随 dispatch 升级（轨迹记录 error_type）、自愈上限 `MAX_SAME_ERROR=2`（同类错误连续失败熔断，结果带 `escalated: true`）、请求新增 `user_confirmed`（勾选后放行资金操作）；calculator 白名单校验由执行层前移到参数层（违规走 invalid_args 可自我纠正） |
+| 2026-11-16 | 新增 | 学习·终止条件 | `app/modules/study/services/termination.py`, `app/modules/study/services/agent_loop.py`, `app/modules/study/services/tools.py`, `app/modules/study/schemas/study.py`, `tests/test_termination.py` | Day 05：新增纯逻辑刹车模块 `termination.py`（零 I/O、可单测）——`StopReason` 六种停止原因；`Budget` 三道上限 + `TASK_BUDGETS` 分档（simple 6 步 / complex 20 步，请求 `budget_profile` 支持 auto 由模型判档、`max_steps` 可显式覆盖）；`LoopGuard` 双指纹（动作指纹抓硬自旋、结果指纹抓变体自旋/乒乓）+ 轮询白名单（同时豁免动作计数与无进展判定）+ 指数退避；`looks_grounded` 第 4 层结果校验（硬实体：订单号/用户号/退款号/任务号/日期，字符串包含判定）；主循环接入四层终止 + 自愈上限改为强制收敛；新增 `_force_final` 强制收敛（`tools=None` 逼模型降级交付）；新增工具 `create_export` / `get_task_status`（`@tool` 新增 `repeatable` 元数据与 `repeatable_tool_names()`），`search_orders` 空结果补 `hint` 语义；结果新增 stop_reason / degraded / grounded / grounding_note / guard_diagnosis / budget_profile / budget_desc / tokens / elapsed_ms，每步新增 `progress_fp`；新增 `tests/test_termination.py` 9 项单测（含白名单轮询不误杀、双指纹、实体抽取） |

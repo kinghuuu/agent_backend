@@ -70,13 +70,27 @@ class AgentStepTrace(BaseModel):
     step: int
     tool_calls: list[ToolCallTrace] = Field(default_factory=list)
     content: str | None = None
+    progress_fp: str | None = Field(
+        default=None,
+        description="该步结果的进展指纹（Day 05）：只看结果不看动作，连续几步相同即判定无进展",
+    )
 
 
 class AgentRunRequest(BaseModel):
     """运行 Function Calling Agent 循环的请求。"""
 
     question: str = Field(min_length=1, description="用户问题")
-    max_steps: int = Field(default=8, ge=1, le=12, description="最大循环步数（防死循环）")
+    budget_profile: Literal["auto", "simple", "complex"] = Field(
+        default="auto",
+        description=(
+            "Day 05 预算档位：auto（先让模型判任务复杂度）/ simple（6 步）/ complex（20 步）。"
+            "档位决定步数、token 与时延三道上限"
+        ),
+    )
+    max_steps: int | None = Field(
+        default=None, ge=1, le=30,
+        description="显式覆盖档位步数上限（课堂实验用，如设 1 观察循环被砍掉）；不传按档位",
+    )
     model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
     user_confirmed: bool = Field(
         default=False,
@@ -92,11 +106,33 @@ class AgentRunResult(BaseModel):
 
     steps: list[AgentStepTrace]
     final_answer: str
-    stopped_by_limit: bool = Field(description="True 表示跑满 max_steps 仍没给出最终回答")
+    stop_reason: str = Field(
+        description=(
+            "停止原因（Day 05）：completed / repeated_action / no_progress / "
+            "max_steps / budget / ungrounded"
+        )
+    )
+    stopped_by_limit: bool = Field(description="True 表示跑满步数上限（stop_reason=max_steps）")
+    degraded: bool = Field(
+        default=False,
+        description="True 表示触发了强制收敛：熔断后用 tools=None 逼模型用已有信息交卷（降级交付）",
+    )
     escalated: bool = Field(
         default=False,
         description="True 表示自愈上限熔断（同一工具同类错误连续失败），已升级为人工处理",
     )
+    grounded: bool = Field(
+        default=True,
+        description="False 表示最终答案没有引用任何工具返回的事实（疑似假收敛）",
+    )
+    grounding_note: str | None = Field(default=None, description="结果校验说明（如已打回重写一次）")
+    guard_diagnosis: str | None = Field(
+        default=None, description="结构终止的病因摘要（最频繁动作、最近几步结果指纹数量）"
+    )
+    budget_profile: str = Field(description="实际使用的预算档位：simple / complex")
+    budget_desc: str = Field(description="档位对应的三道上限描述")
+    tokens: int = Field(description="本次运行累计消耗 token（含分类与强制收敛调用）")
+    elapsed_ms: int = Field(description="总耗时（毫秒）")
     model: str = Field(description="实际使用的模型名")
 
 
