@@ -17,6 +17,7 @@ from app.modules.study.schemas.study import (
     ReactRunResult,
     ToolCallLogEntry,
     ToolOut,
+    ToolSpecBudget,
 )
 from app.modules.study.services import agent_loop, react_loop, structured_extract, tools
 from app.modules.study.services.tools import TOOL_SCHEMAS
@@ -27,7 +28,7 @@ router = APIRouter(tags=["智能体开发学习"])
 @router.get(
     "/tools",
     response_model=APIResponse[list[ToolOut]],
-    summary="Day 01 工具清单",
+    summary="工具清单（Day 01 定义 + Day 04 元数据）",
 )
 async def list_tools() -> APIResponse[list[ToolOut]]:
     """返回当前注册的全部工具与 JSON Schema 说明书（展示"模型眼里看到的工具长什么样"）。"""
@@ -36,6 +37,8 @@ async def list_tools() -> APIResponse[list[ToolOut]]:
             name=schema["function"]["name"],
             description=schema["function"]["description"],
             parameters=schema["function"]["parameters"],
+            side_effect=tools.REGISTRY[schema["function"]["name"]]["side_effect"],
+            require_confirm=tools.REGISTRY[schema["function"]["name"]]["require_confirm"],
         )
         for schema in TOOL_SCHEMAS
     ]
@@ -54,6 +57,20 @@ async def list_tool_calls() -> APIResponse[list[ToolCallLogEntry]]:
     哪些报错后模型自我纠正了"——即 dispatch 分发器（练习 2）的落点。
     """
     return APIResponse(data=[ToolCallLogEntry(**entry) for entry in tools.TOOL_CALL_LOG])
+
+
+@router.get(
+    "/tools/budget",
+    response_model=APIResponse[ToolSpecBudget],
+    summary="Day 04 练习 2：工具说明书预算",
+)
+async def get_tool_budget() -> APIResponse[ToolSpecBudget]:
+    """统计 tools 清单序列化后的总字符数与最长的 3 个 description。
+
+    说明书随每轮请求重复发送，是最容易被忽视的 token 成本项；
+    超过预算（2000 字符）时前端给出警告，提示精简最长的 description。
+    """
+    return APIResponse(data=tools.spec_budget())
 
 
 @router.post(

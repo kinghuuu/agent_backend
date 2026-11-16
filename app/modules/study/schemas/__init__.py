@@ -13,6 +13,8 @@ from app.modules.study.schemas.study import (
     ToolCallLogEntry,
     ToolCallTrace,
     ToolOut,
+    ToolSpecBudget,
+    ToolSpecCost,
 )
 
 __all__ = [
@@ -28,4 +30,6 @@ __all__ = [
     "ToolCallLogEntry",
     "ToolCallTrace",
     "ToolOut",
+    "ToolSpecBudget",
+    "ToolSpecCost",
 ]

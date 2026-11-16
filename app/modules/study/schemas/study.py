@@ -15,6 +15,8 @@ class ToolOut(BaseModel):
     name: str
     description: str
     parameters: dict[str, Any]
+    side_effect: str = Field(default="read", description="副作用分级（Day 04）：read/write/destructive")
+    require_confirm: bool = Field(default=False, description="是否需要用户确认后才能执行（Day 04 确认门）")
 
 
 class ToolCallTrace(BaseModel):
@@ -24,7 +26,11 @@ class ToolCallTrace(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
     result: str
     duration_ms: int | None = Field(default=None, description="工具执行耗时（毫秒），Day 03 练习 2 的观测指标")
-    is_error: bool = Field(default=False, description="工具返回了错误（dispatch 级失败或返回体带 error 键）")
+    is_error: bool = Field(default=False, description="工具返回了错误（ok=false，含校验/业务/确认门拦截）")
+    error_type: str | None = Field(
+        default=None,
+        description="错误类型（Day 04）：bad_json/invalid_args/business_rule/need_confirmation/tool_crash/unknown_tool",
+    )
     self_heal: bool = Field(
         default=False,
         description="True 表示该工具上一轮报错后模型本轮重新发起调用（自我纠正，Day 03 练习 3）",
@@ -38,7 +44,24 @@ class ToolCallLogEntry(BaseModel):
     name: str = Field(description="工具名")
     arguments: dict[str, Any] = Field(default_factory=dict, description="解析后的调用参数")
     duration_ms: int = Field(description="执行耗时（毫秒）")
-    is_error: bool = Field(description="是否为 dispatch 级失败（工具不存在/参数非法/执行异常）")
+    is_error: bool = Field(description="是否失败（ok=false）")
+    error_type: str | None = Field(default=None, description="错误类型（Day 04 错误契约）")
+
+
+class ToolSpecCost(BaseModel):
+    """单个工具 description 的字符成本（Day 04 练习 2）。"""
+
+    name: str = Field(description="工具名")
+    chars: int = Field(description="description 字符数")
+
+
+class ToolSpecBudget(BaseModel):
+    """工具说明书预算（Day 04 练习 2）：说明书随每轮请求重复发送，是隐性 token 成本。"""
+
+    total_chars: int = Field(description="tools 清单序列化后的总字符数")
+    limit: int = Field(description="预算上限（字符）")
+    over_limit: bool = Field(description="是否超预算")
+    top_tools: list[ToolSpecCost] = Field(description="description 最长的 3 个工具")
 
 
 class AgentStepTrace(BaseModel):
@@ -55,6 +78,13 @@ class AgentRunRequest(BaseModel):
     question: str = Field(min_length=1, description="用户问题")
     max_steps: int = Field(default=8, ge=1, le=12, description="最大循环步数（防死循环）")
     model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+    user_confirmed: bool = Field(
+        default=False,
+        description=(
+            "Day 04 确认门：资金操作（退款）的二次确认。"
+            "模型请求确认后，用户在前端勾选并重新发送同一问题即可放行执行"
+        ),
+    )
 
 
 class AgentRunResult(BaseModel):
@@ -63,6 +93,10 @@ class AgentRunResult(BaseModel):
     steps: list[AgentStepTrace]
     final_answer: str
     stopped_by_limit: bool = Field(description="True 表示跑满 max_steps 仍没给出最终回答")
+    escalated: bool = Field(
+        default=False,
+        description="True 表示自愈上限熔断（同一工具同类错误连续失败），已升级为人工处理",
+    )
     model: str = Field(description="实际使用的模型名")
 
 
