@@ -1,4 +1,4 @@
-"""智能体开发学习接口：工具清单、Function Calling Agent 循环、手写 ReAct 循环、结构化输出实验。
+"""智能体开发学习接口：工具清单、工具调用日志、Function Calling Agent 循环、手写 ReAct 循环、结构化输出实验。
 
 所有接口都没有落库行为——学习页是"试验台"，跑完即走，不产生会话数据。
 """
@@ -15,9 +15,10 @@ from app.modules.study.schemas.study import (
     ExtractRunResult,
     ReactRunRequest,
     ReactRunResult,
+    ToolCallLogEntry,
     ToolOut,
 )
-from app.modules.study.services import agent_loop, react_loop, structured_extract
+from app.modules.study.services import agent_loop, react_loop, structured_extract, tools
 from app.modules.study.services.tools import TOOL_SCHEMAS
 
 router = APIRouter(tags=["智能体开发学习"])
@@ -39,6 +40,20 @@ async def list_tools() -> APIResponse[list[ToolOut]]:
         for schema in TOOL_SCHEMAS
     ]
     return APIResponse(data=data)
+
+
+@router.get(
+    "/tools/calls",
+    response_model=APIResponse[list[ToolCallLogEntry]],
+    summary="Day 03 工具调用日志",
+)
+async def list_tool_calls() -> APIResponse[list[ToolCallLogEntry]]:
+    """返回最近的工具调用记录（内存环形队列，最多 200 条，重启即清）。
+
+    用来观察"一轮 Agent 对话到底真实执行了几次工具、耗时多少、
+    哪些报错后模型自我纠正了"——即 dispatch 分发器（练习 2）的落点。
+    """
+    return APIResponse(data=[ToolCallLogEntry(**entry) for entry in tools.TOOL_CALL_LOG])
 
 
 @router.post(

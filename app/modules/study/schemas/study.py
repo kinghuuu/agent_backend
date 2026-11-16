@@ -23,6 +23,22 @@ class ToolCallTrace(BaseModel):
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
     result: str
+    duration_ms: int | None = Field(default=None, description="工具执行耗时（毫秒），Day 03 练习 2 的观测指标")
+    is_error: bool = Field(default=False, description="工具返回了错误（dispatch 级失败或返回体带 error 键）")
+    self_heal: bool = Field(
+        default=False,
+        description="True 表示该工具上一轮报错后模型本轮重新发起调用（自我纠正，Day 03 练习 3）",
+    )
+
+
+class ToolCallLogEntry(BaseModel):
+    """工具调用日志条目（Day 03 练习 2）：观察一轮对话真实触发了几次工具执行。"""
+
+    time: str = Field(description="调用时刻（时:分:秒）")
+    name: str = Field(description="工具名")
+    arguments: dict[str, Any] = Field(default_factory=dict, description="解析后的调用参数")
+    duration_ms: int = Field(description="执行耗时（毫秒）")
+    is_error: bool = Field(description="是否为 dispatch 级失败（工具不存在/参数非法/执行异常）")
 
 
 class AgentStepTrace(BaseModel):

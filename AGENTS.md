@@ -17,7 +17,7 @@
 | 系统 / 健康检查 | `/api/v1/health` | 应用、PostgreSQL、Redis 连通状态                         |
 | 模型管理        | `/api/v1/models` | LLM / Embedding / Rerank 配置 CRUD、连通测试、上下文测试 |
 | 会话            | `/api/v1/chat`   | 会话管理（新建 / 重命名 / 删除 / 清空）、多轮对话（流式 SSE + 非流式）、可用模型列表 |
-| 智能体开发学习  | `/api/v1/study`  | Day 01–02 实验台：工具清单（含 JSON Schema）、Function Calling Agent 循环、手写 ReAct 文本协议循环、结构化输出实验（三级方案对比，均返回结构化执行轨迹，无落库） |
+| 智能体开发学习  | `/api/v1/study`  | Day 01–03 实验台：工具清单（含 JSON Schema）、工具调用日志、Function Calling Agent 循环（并行多工具调度 + self-heal 观测）、手写 ReAct 文本协议循环、结构化输出实验（三级方案对比，均返回结构化执行轨迹，无落库） |
 
 ## 2. 启动与常用命令
 
@@ -163,3 +163,4 @@ agent_backend/
 | 2026-11-13 | 新增 | 学习·结构化输出 | `app/modules/study/services/structured_extract.py`, `app/modules/study/schemas/study.py`, `app/modules/study/views/study.py` | Day 02：新增结构化输出实验接口 `/extract/run`（客户意图提取器，三级方案对比——口头要求反面教材 / JSON Mode / Pydantic Schema 合同），解析与校验失败时把"错误现场"回填进 messages 重试；练习 1（intent 6 类枚举）练习 2（嵌套 items）练习 3（通用 `retry_until_valid`）全部落实；`json_schema` 严格约束遇 400 自动降级 json_object 并记入轨迹；意图枚举取值单点定义（`INTENT_VALUES`），Schema prompt 与 Pydantic 模型同源 |
 | 2026-11-13 | 修改 | 学习·Prompt 四段式 | `app/modules/study/services/agent_loop.py` | Day 02：Agent 循环的 SYSTEM_PROMPT 按"角色/规则/输出格式/示例"四段式模板重写，规则编号化可逐条测试（为 Day 16 评估体系铺路），内容语义与原版一致 |
 | 2026-11-13 | 修复 | 学习·结构化输出 | `app/modules/study/services/structured_extract.py` | `/extract/run` json_schema 模式报 "'NoneType' object is not callable"：`_make_json_schema_fetch` 定义闭包后漏写 `return fetch`，函数返回 None 被当作 fetch 调用；补上 return 并验证 |
+| 2026-11-13 | 新增 | 学习·多工具调度 | `app/modules/study/services/tools.py`, `app/modules/study/services/agent_loop.py`, `app/modules/study/views/study.py`, `app/modules/study/schemas/study.py` | Day 03：新增统一分发器 `dispatch`（解析参数 → 查表调用 → 错误以 `{"error": ...}` JSON 返回的 self-heal 契约，主循环不再自己 try/except）；`get_weather` 加 `unit` 枚举参数（摄氏/华氏换算，演示串行依赖调度）并补杭州假数据；`calculator` 加字符白名单校验层（练习 1，eval 前拦截白名单外标识符）；新增工具调用日志 `TOOL_CALL_LOG`（内存 deque 200 条：时间/工具/参数/耗时/是否报错）与接口 `GET /tools/calls`（练习 2）；主循环轨迹新增 `duration_ms` / `is_error`，上一轮报错的工具本轮被再次调用时标 `self_heal`（练习 3，供 Day 05 重试策略分析） |

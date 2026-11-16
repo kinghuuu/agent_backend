@@ -10,6 +10,7 @@ from app.modules.study.schemas.study import (
     ReactRunRequest,
     ReactRunResult,
     ReactStepTrace,
+    ToolCallLogEntry,
     ToolCallTrace,
     ToolOut,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "ReactRunRequest",
     "ReactRunResult",
     "ReactStepTrace",
+    "ToolCallLogEntry",
     "ToolCallTrace",
     "ToolOut",
 ]
