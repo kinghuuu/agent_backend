@@ -4,12 +4,22 @@
 """
 
 
-def chat_completions_url(base_url: str) -> str:
-    """拼接 ``/chat/completions`` 地址；base_url 没带 ``/v1`` 时自动补上。"""
+def _v1_base(base_url: str) -> str:
+    """把服务地址规整到以 ``/v1`` 结尾（已带则原样保留）。"""
     base = base_url.rstrip("/")
     if not base.endswith("/v1") and "/v1/" not in base:
         base = f"{base}/v1"
-    return f"{base}/chat/completions"
+    return base
+
+
+def chat_completions_url(base_url: str) -> str:
+    """拼接 ``/chat/completions`` 地址；base_url 没带 ``/v1`` 时自动补上。"""
+    return f"{_v1_base(base_url)}/chat/completions"
+
+
+def embeddings_url(base_url: str) -> str:
+    """拼接 ``/embeddings`` 地址（Embedding 模型不能走 chat 端点）。"""
+    return f"{_v1_base(base_url)}/embeddings"
 
 
 def auth_headers(api_key: str | None) -> dict[str, str]:
