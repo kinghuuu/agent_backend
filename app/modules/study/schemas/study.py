@@ -106,6 +106,10 @@ class AgentRunResult(BaseModel):
 
     steps: list[AgentStepTrace]
     final_answer: str
+    session_messages: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="本轮实际产生的 assistant/tool 消息（Day 06 会话记忆回写与审计用）",
+    )
     stop_reason: str = Field(
         description=(
             "停止原因（Day 05）：completed / repeated_action / no_progress / "
@@ -212,3 +216,57 @@ class ExtractRunResult(BaseModel):
     )
     success: bool = Field(description="是否成功拿到通过校验的工单")
     model: str = Field(description="实际使用的模型名")
+
+
+# ---------- Day 06 多轮会话（放在 AgentRunResult 之后，避免前向引用） ----------
+
+
+class SessionChatRequest(BaseModel):
+    """Day 06 多轮会话请求：同一 session_id 的多次调用共享一份记忆。"""
+
+    message: str = Field(min_length=1, description="本轮用户输入")
+    session_id: str | None = Field(
+        default=None,
+        description="会话 ID；传同一个 ID 可继续追问，不传则后端自动新建（返回值里可拿到）",
+    )
+    budget_profile: Literal["auto", "simple", "complex"] = Field(
+        default="auto", description="复用 Day 05 的任务预算档位"
+    )
+    max_steps: int | None = Field(
+        default=None, ge=1, le=30, description="显式覆盖档位步数；不传按档位"
+    )
+    model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+    user_confirmed: bool = Field(default=False, description="Day 04 资金操作确认放行")
+
+
+class SessionStateOut(BaseModel):
+    """短期记忆状态快照（约束锚点 / 事实槽位 / 摘要 / 水位 / 淘汰记录）。"""
+
+    session_id: str
+    system: str = Field(description="原始 system prompt（宪法区，永不裁剪）")
+    constraints: list[str] = Field(description="用户硬约束锚点（永不裁剪、每轮重放）")
+    facts: dict[str, Any] = Field(description="结构化事实槽位（事实不靠摘要）")
+    anchors: list[str] = Field(description="摘要质检补回的硬事实")
+    summary: str = Field(description="滚动摘要（增量合并）")
+    turn: int = Field(description="已完成的对话轮数")
+    total_tokens: int = Field(description="会话累计消耗 token")
+    recent_rounds: int = Field(description="仍在近轮原文区的轮数")
+    dropped: list[dict[str, Any]] = Field(description="淘汰记录（审计用）")
+    water_events: list[dict[str, Any]] = Field(description="水位线事件（60/80/95%）")
+
+
+class SessionChatResult(BaseModel):
+    """多轮会话结果：本轮 Agent 执行 + 会话记忆投影后的状态。"""
+
+    session_id: str
+    turn: int
+    context_tokens: int = Field(description="本轮渲染出的上下文 token 估算（含工具 Schema）")
+    water_level: str = Field(description="当前水位：normal/watch/summarize/force_trim")
+    constraints: list[str]
+    facts: dict[str, Any]
+    anchors: list[str]
+    summary: str
+    recent_rounds: int
+    dropped: list[dict[str, Any]]
+    water_events: list[dict[str, Any]]
+    run: AgentRunResult = Field(description="本轮 Day 05 循环的完整轨迹")

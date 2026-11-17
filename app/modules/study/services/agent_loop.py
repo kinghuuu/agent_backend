@@ -103,8 +103,42 @@ def _usage_tokens(resp: Any) -> int:
     return int(getattr(usage, "total_tokens", 0) or 0)
 
 
-async def run(db: AsyncSession, payload: AgentRunRequest) -> dict[str, Any]:
-    """运行一次 Agent 会话：四层终止 + 强制收敛，返回完整执行轨迹。"""
+def ensure_final_message(
+    trace_messages: list[dict[str, Any]],
+    answer: str,
+    final_message: dict[str, Any] | None = None,
+) -> None:
+    """保证本轮轨迹以"最终 assistant 消息"收尾，且不丢模型原始字段。
+
+    为什么不能重建：thinking 模式模型（如 Qwen3）要求把上一轮 assistant 的
+    ``reasoning_content`` 原样传回，一旦用 ``{"role": "assistant", "content": ...}``
+    重建，第二轮多轮回放就会 400。所以优先复用模型原始返回；轨迹末尾若已是
+    最终回答（assistant 且无 tool_calls）也直接复用，只有异常路径才补裸消息。
+    """
+    if final_message is not None:
+        trace_messages.append(final_message)
+        return
+    if (
+        trace_messages
+        and trace_messages[-1].get("role") == "assistant"
+        and not trace_messages[-1].get("tool_calls")
+    ):
+        return
+    # 兜底：轨迹里根本没有最终 assistant（如异常中断），只能补一条裸消息
+    trace_messages.append({"role": "assistant", "content": answer})
+
+
+async def run(
+    db: AsyncSession,
+    payload: AgentRunRequest,
+    *,
+    initial_messages: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """运行一次 Agent 会话：四层终止 + 强制收敛，返回完整执行轨迹。
+
+    ``initial_messages`` 由 Day 06 会话层传入（已从 SessionState 渲染好），
+    不传时维持 Day 01 起的单轮行为：[system, user]。
+    """
     cfg = await resolve_model(db, payload.model_config_id)
     client = build_client(cfg)
 
@@ -121,11 +155,17 @@ async def run(db: AsyncSession, payload: AgentRunRequest) -> dict[str, Any]:
     guard = LoopGuard(repeatable=set(tools.repeatable_tool_names()))
 
     t0 = time.monotonic()
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": payload.question},
-    ]
+    messages: list[dict[str, Any]] = (
+        list(initial_messages)
+        if initial_messages is not None
+        else [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": payload.question},
+        ]
+    )
     steps: list[dict[str, Any]] = []
+    # Day 06：本轮产生的 assistant/tool 消息，供会话层回写 SessionState
+    trace_messages: list[dict[str, Any]] = []
     results_all: list[dict[str, Any]] = []   # 第 4 层校验用的全部工具结果
     tokens = 0
     error_tools: set[str] = set()            # Day 03 self-heal 观测
@@ -140,11 +180,14 @@ async def run(db: AsyncSession, payload: AgentRunRequest) -> dict[str, Any]:
         escalated: bool = False,
         grounded: bool = True,
         grounding_note: str | None = None,
+        final_message: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """统一的返回结构：停止原因 + 轨迹 + 成本 + 质检结论。"""
+        ensure_final_message(trace_messages, answer, final_message)
         return {
             "steps": steps,
             "final_answer": answer,
+            "session_messages": list(trace_messages),
             "stop_reason": reason.value,
             "stopped_by_limit": reason is StopReason.MAX_STEPS,
             "degraded": degraded,
@@ -171,6 +214,7 @@ async def run(db: AsyncSession, payload: AgentRunRequest) -> dict[str, Any]:
         tokens += _usage_tokens(resp)
         msg = resp.choices[0].message
         messages.append(msg.model_dump(exclude_none=True))
+        trace_messages.append(messages[-1])
 
         # ---------- 第 1 层：语义终止 + 第 4 层结果校验 ----------
         if not msg.tool_calls:
@@ -190,6 +234,8 @@ async def run(db: AsyncSession, payload: AgentRunRequest) -> dict[str, Any]:
                 tokens += _usage_tokens(retry)
                 retry_msg = retry.choices[0].message
                 messages.append(retry_msg.model_dump(exclude_none=True))
+                # 打回后的回答也要进轨迹（保留 reasoning_content，供下一轮回放）
+                trace_messages.append(messages[-1])
                 content = retry_msg.content or content
                 grounded = termination.looks_grounded(content, results_all)
                 note = "答案未引用工具结果，已打回重写一次"
@@ -238,6 +284,7 @@ async def run(db: AsyncSession, payload: AgentRunRequest) -> dict[str, Any]:
                 error_type = body.get("error_type")
 
             messages.append({"role": "tool", "tool_call_id": call.id, "content": str(result)})
+            trace_messages.append(messages[-1])
             step_calls.append(
                 {
                     "name": name,
@@ -325,8 +372,14 @@ async def _force_final(
     )
     # build_result 闭包读的是熔断前的 token/耗时，这次收敛调用要补上
     total_tokens = tokens + _usage_tokens(resp)
+    final_msg = resp.choices[0].message
     result = build_result(
-        reason, resp.choices[0].message.content or "", degraded=True, escalated=escalated
+        reason,
+        final_msg.content or "",
+        degraded=True,
+        escalated=escalated,
+        # 收敛回答同样要带原始字段（reasoning_content），否则下轮回放会 400
+        final_message=final_msg.model_dump(exclude_none=True),
     )
     result["tokens"] = total_tokens
     result["elapsed_ms"] = round((time.monotonic() - t0) * 1000)
