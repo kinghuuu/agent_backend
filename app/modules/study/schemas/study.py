@@ -270,3 +270,134 @@ class SessionChatResult(BaseModel):
     dropped: list[dict[str, Any]]
     water_events: list[dict[str, Any]]
     run: AgentRunResult = Field(description="本轮 Day 05 循环的完整轨迹")
+
+
+# ---------- Day 07 长期记忆 + RAG（放在最后，Day07ChatResult 引用 AgentRunResult） ----------
+
+
+class MemoryWriteRequest(BaseModel):
+    """写一条长期记忆：同 key 覆盖，绝不追加。"""
+
+    key: str = Field(min_length=1, max_length=100, description="事实键，如 dietary")
+    value: str = Field(min_length=1, description="事实值，如 不吃香菜")
+    source_turn: int | None = Field(default=None, ge=1, description="来源对话轮次（可追溯）")
+
+
+class MemoryFactOut(BaseModel):
+    """一条长期记忆事实。"""
+
+    key: str
+    value: str
+    source_turn: int | None = None
+    updated_at: str | None = Field(default=None, description="最后更新时间")
+
+
+class MemoryWriteResult(BaseModel):
+    """写入结果：created=True 为新建，False 表示覆盖了旧值。"""
+
+    created: bool
+    fact: MemoryFactOut
+
+
+class MemoryConflictOut(BaseModel):
+    """同义键组内的疑似冲突（课程练习 1）。"""
+
+    group: str
+    keys: list[str]
+    values: list[str]
+    suggestion: str
+
+
+class MemoryProfileOut(BaseModel):
+    """某用户的完整画像快照。"""
+
+    user_id: str
+    facts: list[MemoryFactOut]
+    prompt: str = Field(description="会话开始时注入 system 的画像文本")
+    conflicts: list[MemoryConflictOut]
+
+
+class KnowledgeDocIn(BaseModel):
+    """录入 / 重建一篇知识文档。"""
+
+    doc_id: str = Field(min_length=1, max_length=100, description="文档 ID；重复提交则整篇重建")
+    title: str = Field(min_length=1, max_length=200, description="文档标题（检索来源标注用）")
+    content: str = Field(min_length=1, description="文档正文（Markdown，按标题分节切块）")
+    version: str | None = Field(default=None, max_length=50, description="版本 / 时效，如 2026-10 版")
+    chunk_size: int = Field(default=400, ge=100, le=2000, description="目标块大小（字）")
+    overlap: int = Field(default=60, ge=0, le=500, description="相邻块重叠字数")
+
+
+class KnowledgeDocOut(BaseModel):
+    """文档索引概览（按 doc_id 聚合）。"""
+
+    doc_id: str
+    doc_title: str
+    doc_version: str | None = None
+    chunks: int
+    updated_at: Any = Field(default=None, description="最近更新时间")
+
+
+class KnowledgeIndexResult(BaseModel):
+    """建索引结果。"""
+
+    doc_id: str
+    chunks: int
+    embedding_source: str = Field(description="向量来源：api（真实模型）/ hash-fallback（本地回退）")
+
+
+class KnowledgeSearchRequest(BaseModel):
+    """混合检索请求（只检索，不生成回答）。"""
+
+    query: str = Field(min_length=1, description="查询语句")
+    top_k: int = Field(default=3, ge=1, le=20)
+    alpha: float = Field(default=0.5, ge=0, le=1, description="向量路权重，1-alpha 给 BM25")
+    doc_id: str | None = Field(default=None, description="元数据过滤：只检索该文档")
+
+
+class KnowledgeHit(BaseModel):
+    """一个命中块（含两路排名与 RRF 得分）。"""
+
+    doc_id: str
+    doc_title: str
+    doc_version: str | None = None
+    chunk_index: int
+    section: str | None = None
+    content: str
+    rrf: float
+    vec_score: float
+    bm25_score: float
+    vec_rank: int
+    bm25_rank: int
+    embedding_source: str | None = None
+
+
+class Day07ChatRequest(BaseModel):
+    """Day07 问答：画像 + RAG + 工具三条管道一起上。"""
+
+    user_id: str = Field(min_length=1, max_length=100, description="用户 ID（长期记忆按它组织）")
+    message: str = Field(min_length=1, description="本轮用户输入")
+    history: list[dict[str, str]] = Field(
+        default_factory=list, description="多轮历史（仅用于 history-aware 查询改写）"
+    )
+    doc_id: str | None = Field(default=None, description="只检索该文档（元数据过滤）")
+    top_k: int = Field(default=3, ge=1, le=10)
+    alpha: float = Field(default=0.5, ge=0, le=1)
+    budget_profile: Literal["auto", "simple", "complex"] = Field(default="auto")
+    max_steps: int | None = Field(default=None, ge=1, le=30)
+    model_config_id: int | None = None
+    user_confirmed: bool = False
+
+
+class Day07ChatResult(BaseModel):
+    """Day07 问答结果：最终回答 + 三条管道的执行摘要。"""
+
+    answer: str
+    user_id: str
+    profile: str
+    recalled_facts: list[MemoryFactOut]
+    rewritten_query: str
+    hits: list[KnowledgeHit]
+    conflicts: list[dict[str, Any]]
+    run: AgentRunResult
+    pipeline: dict[str, Any]

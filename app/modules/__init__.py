@@ -14,3 +14,4 @@
 
 from app.modules.chat import models  # noqa: F401
 from app.modules.model_config import models as model_config_models  # noqa: F401
+from app.modules.study import models as study_models  # noqa: F401

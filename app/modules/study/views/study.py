@@ -8,11 +8,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schemas import APIResponse
 from app.deps import get_db
+from app.modules.study.crud import knowledge as knowledge_crud
 from app.modules.study.schemas.study import (
     AgentRunRequest,
     AgentRunResult,
+    Day07ChatRequest,
+    Day07ChatResult,
     ExtractRunRequest,
     ExtractRunResult,
+    KnowledgeDocIn,
+    KnowledgeDocOut,
+    KnowledgeHit,
+    KnowledgeIndexResult,
+    KnowledgeSearchRequest,
+    MemoryProfileOut,
+    MemoryWriteRequest,
+    MemoryWriteResult,
     ReactRunRequest,
     ReactRunResult,
     SessionChatRequest,
@@ -24,6 +35,9 @@ from app.modules.study.schemas.study import (
 )
 from app.modules.study.services import (
     agent_loop,
+    day07_agent,
+    long_memory,
+    rag,
     react_loop,
     session_agent,
     structured_extract,
@@ -194,3 +208,159 @@ async def delete_session(session_id: str) -> APIResponse[dict[str, bool]]:
     if not session_agent.session_manager.reset(session_id):
         raise HTTPException(status_code=404, detail="会话不存在或已随进程重启清空")
     return APIResponse(data={"reset": True})
+
+
+# ---------- Day 07：长期记忆（画像类管道） ----------
+
+
+@router.get(
+    "/memory/{user_id}",
+    response_model=APIResponse[MemoryProfileOut],
+    summary="Day 07 用户长期画像",
+)
+async def get_memory(
+    user_id: str, db: AsyncSession = Depends(get_db)
+) -> APIResponse[MemoryProfileOut]:
+    """返回该用户的全部事实、会话开头要注入的文本，以及同义键冲突提示。"""
+    facts = await long_memory.list_facts(db, user_id)
+    data = MemoryProfileOut(
+        user_id=user_id,
+        facts=facts,
+        prompt=long_memory.recall_prompt(facts),
+        conflicts=long_memory.detect_conflicts(facts),
+    )
+    return APIResponse(data=data)
+
+
+@router.post(
+    "/memory/{user_id}",
+    response_model=APIResponse[MemoryWriteResult],
+    summary="Day 07 写入 / 覆盖长期记忆",
+)
+async def write_memory(
+    user_id: str,
+    payload: MemoryWriteRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[MemoryWriteResult]:
+    """同一 key 覆盖而非追加；created 标明本次是新建还是覆盖。"""
+    try:
+        result = await long_memory.remember(
+            db, user_id, payload.key, payload.value, payload.source_turn
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.delete(
+    "/memory/{user_id}/{key}",
+    response_model=APIResponse[dict[str, bool]],
+    summary="Day 07 遗忘一条长期记忆",
+)
+async def forget_memory(
+    user_id: str, key: str, db: AsyncSession = Depends(get_db)
+) -> APIResponse[dict[str, bool]]:
+    """按 key 删除一条事实（课程练习 1 的 forget）。"""
+    deleted = await long_memory.forget(db, user_id, key)
+    return APIResponse(data={"deleted": deleted})
+
+
+@router.delete(
+    "/memory/{user_id}",
+    response_model=APIResponse[dict[str, int]],
+    summary="Day 07 清空某用户的长期记忆",
+)
+async def clear_memory(
+    user_id: str, db: AsyncSession = Depends(get_db)
+) -> APIResponse[dict[str, int]]:
+    """清空该用户全部事实，返回删除条数。"""
+    deleted = await long_memory.clear_user(db, user_id)
+    return APIResponse(data={"deleted": deleted})
+
+
+# ---------- Day 07：RAG 知识库（文档类管道） ----------
+
+
+@router.post(
+    "/knowledge/docs",
+    response_model=APIResponse[KnowledgeIndexResult],
+    summary="Day 07 录入 / 重建知识文档（切块 + 向量化）",
+)
+async def upsert_document(
+    payload: KnowledgeDocIn, db: AsyncSession = Depends(get_db)
+) -> APIResponse[KnowledgeIndexResult]:
+    """先删同 doc_id 的旧块再重建，保证旧版本不残留。"""
+    try:
+        result = await rag.index_document(
+            db,
+            doc_id=payload.doc_id,
+            title=payload.title,
+            content=payload.content,
+            version=payload.version,
+            size=payload.chunk_size,
+            overlap=payload.overlap,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.get(
+    "/knowledge/docs",
+    response_model=APIResponse[list[KnowledgeDocOut]],
+    summary="Day 07 知识文档列表",
+)
+async def list_documents(db: AsyncSession = Depends(get_db)) -> APIResponse[list[KnowledgeDocOut]]:
+    """按 doc_id 聚合出文档列表（标题 / 版本 / 块数 / 更新时间）。"""
+    rows = await knowledge_crud.list_doc_summaries(db)
+    return APIResponse(data=[KnowledgeDocOut(**row) for row in rows])
+
+
+@router.delete(
+    "/knowledge/docs/{doc_id}",
+    response_model=APIResponse[dict[str, int]],
+    summary="Day 07 删除整篇文档的全部块",
+)
+async def delete_document(
+    doc_id: str, db: AsyncSession = Depends(get_db)
+) -> APIResponse[dict[str, int]]:
+    """按 doc_id 删除全部切块，返回删除条数。"""
+    deleted = await knowledge_crud.delete_doc(db, doc_id)
+    return APIResponse(data={"deleted": deleted})
+
+
+@router.post(
+    "/knowledge/search",
+    response_model=APIResponse[list[KnowledgeHit]],
+    summary="Day 07 混合检索（向量 + BM25 + RRF）",
+)
+async def search_knowledge(
+    payload: KnowledgeSearchRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[list[KnowledgeHit]]:
+    """只检索不生成，方便前端单独观察两路排名如何被 RRF 融合。"""
+    where = {"doc_id": payload.doc_id} if payload.doc_id else None
+    hits = await rag.search(
+        db, payload.query, top_k=payload.top_k, alpha=payload.alpha, where=where
+    )
+    return APIResponse(data=hits)
+
+
+# ---------- Day 07：三条管道组装 ----------
+
+
+@router.post(
+    "/day07/chat",
+    response_model=APIResponse[Day07ChatResult],
+    summary="Day 07 问答：长期画像 + RAG + 工具",
+)
+async def chat_day07(
+    payload: Day07ChatRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day07ChatResult]:
+    """一次问答走完三条管道，返回最终回答与每条管道的执行摘要。"""
+    try:
+        result = await day07_agent.chat(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)

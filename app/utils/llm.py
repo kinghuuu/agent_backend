@@ -22,6 +22,24 @@ def embeddings_url(base_url: str) -> str:
     return f"{_v1_base(base_url)}/embeddings"
 
 
+def rerank_urls(base_url: str) -> list[str]:
+    """返回 rerank 端点的候选地址列表，按优先级排列（探测时依次尝试）。
+
+    Rerank 没有官方统一协议，但主流服务（Cohere / Jina / 硅基流动 / 本地
+    Xinference）都是 ``POST {base}/v1/rerank``，而本地 HuggingFace TEI 只暴露
+    根路径 ``POST {base}/rerank``，所以两个都给出，由调用方按 404 回退。
+
+    参数:
+        base_url: 模型配置里的服务地址，可带可不带 ``/v1``。
+
+    返回:
+        去重后的候选地址；``base_url`` 已带 ``/v1`` 时只返回一个。
+    """
+    v1_path = f"{_v1_base(base_url)}/rerank"
+    root_path = f"{base_url.rstrip('/')}/rerank"
+    return [v1_path] if v1_path == root_path else [v1_path, root_path]
+
+
 def auth_headers(api_key: str | None) -> dict[str, str]:
     """构造请求头：有 Key 时带 Bearer 认证。"""
     headers = {"Content-Type": "application/json"}

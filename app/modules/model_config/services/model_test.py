@@ -1,4 +1,8 @@
-﻿"""模型连通测试的业务层：连通测试与上下文测试（OpenAI 兼容接口）。"""
+﻿"""模型连通测试的业务层：连通测试与上下文测试。
+
+LLM 走 OpenAI 兼容的 ``/chat/completions``，Embedding 走 ``/embeddings``，
+Rerank 走通用 ``/rerank``（Cohere 风格的 query + documents 请求体）。
+"""
 
 import time
 
@@ -7,7 +11,7 @@ import httpx
 from app.core.logging import get_logger
 from app.modules.model_config.models import ModelConfig
 from app.modules.model_config.schemas import ModelTestResult
-from app.utils.llm import auth_headers, chat_completions_url, embeddings_url
+from app.utils.llm import auth_headers, chat_completions_url, embeddings_url, rerank_urls
 
 logger = get_logger(__name__)
 
@@ -73,11 +77,7 @@ async def test_connectivity(cfg: ModelConfig) -> ModelTestResult:
         return await _test_embedding(cfg, start)
 
     if cfg.model_type == "rerank":
-        return _fail(
-            start,
-            "Rerank 不遵循 OpenAI 标准协议，暂不支持自动探测；"
-            "请用业务侧检索接口验证，或先在模型管理里保留配置待后续接入",
-        )
+        return await _test_rerank(cfg, start)
 
     try:
         data = await _chat(
@@ -116,6 +116,102 @@ async def _test_embedding(cfg: ModelConfig, start: float) -> ModelTestResult:
         return _fail(start, f"服务返回 {exc.response.status_code}: {exc.response.text[:200]}")
     except Exception as exc:  # noqa: BLE001
         return _fail(start, f"连接失败: {exc}")
+
+
+# rerank 探测用固定样例：1 条相关 + 2 条无关，用于确认端点真的在做「相关性排序」
+_RERANK_QUERY = "向量检索有什么用处"
+_RERANK_DOCUMENTS = [
+    "向量检索把文本映射成向量，再按语义相似度召回相关内容。",
+    "红烧肉的做法：五花肉切块，加冰糖炒糖色后小火慢炖。",
+    "Python 的 GIL 会限制多线程的并行执行效率。",
+]
+
+
+def _rerank_results(data: object) -> list[dict]:
+    """从 rerank 响应中取出排序结果，兼容两种形态。
+
+    - Cohere / Jina / 硅基流动：``{"results": [{"index", "relevance_score"}, ...]}``
+    - 本地 HuggingFace TEI：直接是一个裸数组 ``[{"index", "score"}, ...]``
+
+    非预期结构返回空列表，由调用方判定为失败。
+    """
+    raw = data.get("results") if isinstance(data, dict) else data
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
+async def _test_rerank(cfg: ModelConfig, start: float) -> ModelTestResult:
+    """Rerank 连通测试：发一次 ``query + documents`` 请求，看是否返回排序结果。
+
+    Rerank 没有官方统一协议，但主流实现（Cohere / Jina / 硅基流动 / 本地
+    Xinference）都用 ``POST /v1/rerank``，请求体为 ``{model, query, documents}``；
+    本地 TEI 只暴露根路径 ``/rerank``。因此候选地址按 404 依次回退，其余错误报错。
+
+    判定成功的标准是「拿到了排序结果且带分数」——只有真正的 rerank 端点才会
+    返回这个结构，普通 chat / embedding 端点不会。
+    """
+    payload = {
+        "model": cfg.model_name,
+        "query": _RERANK_QUERY,
+        "documents": _RERANK_DOCUMENTS,
+        "top_n": len(_RERANK_DOCUMENTS),
+    }
+    tried: list[str] = []
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        for url in rerank_urls(cfg.base_url):
+            tried.append(url)
+            try:
+                resp = await client.post(
+                    url, json=payload, headers=auth_headers(cfg.api_key)
+                )
+            except httpx.TimeoutException:
+                return _fail(start, "连接超时（15s），请检查服务地址或网络")
+            except Exception as exc:  # noqa: BLE001
+                return _fail(start, f"连接失败: {exc}")
+
+            # 404 说明这个路径下没有 rerank 接口，换下一个候选地址继续试
+            if resp.status_code == 404:
+                continue
+            if resp.status_code >= 400:
+                return _fail(
+                    start, f"服务返回 {resp.status_code}: {resp.text[:200]}"
+                )
+
+            try:
+                data = resp.json()
+            except ValueError:
+                return _fail(start, f"{url} 返回的不是 JSON，可能不是 rerank 接口")
+
+            results = _rerank_results(data)
+            if not results:
+                return _fail(
+                    start,
+                    "接口可访问但没有返回排序结果：请确认「实际模型名」是 rerank 模型"
+                    f"（如 BAAI/bge-reranker-v2-m3），当前为 {cfg.model_name}",
+                )
+
+            top = results[0]
+            score = top.get("relevance_score", top.get("score"))
+            return ModelTestResult(
+                success=True,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                message=(
+                    f"连通成功，返回 {len(results)} 条排序结果；"
+                    f"Top1 是文档 #{top.get('index', 0)}，相关度 {score}"
+                ),
+                detail={
+                    "url": url,
+                    "results": results,
+                    "usage": data.get("usage") if isinstance(data, dict) else None,
+                },
+            )
+
+    return _fail(
+        start,
+        "未找到 rerank 端点，已尝试：" + "、".join(tried) + "；请检查服务地址是否正确",
+    )
 
 
 async def test_context_length(cfg: ModelConfig, num_tokens: int = 4000) -> ModelTestResult:
