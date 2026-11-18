@@ -401,3 +401,114 @@ class Day07ChatResult(BaseModel):
     conflicts: list[dict[str, Any]]
     run: AgentRunResult
     pipeline: dict[str, Any]
+
+
+# ---------- Day 08 上下文工程（四层编排器） ----------
+
+
+class ContextBlockIn(BaseModel):
+    """一块手工检索原料（没接真实知识库时用它做编排实验）。"""
+
+    text: str = Field(min_length=1, description="块正文")
+    title: str = Field(default="手工资料", max_length=200, description="来源标题（注入时标注）")
+    chunk_index: int = Field(default=0, ge=0, description="块序号（来源标注用）")
+    score: float = Field(default=0.5, description="相关度分数：编排按它决定重要性排序")
+    section: str | None = Field(default=None, max_length=200, description="所属章节")
+    style: Literal["narrative", "clause"] = Field(
+        default="narrative",
+        description="文档风格：narrative 按总-分结构保头截尾；clause 条款类保尾截头（例外在末尾）",
+    )
+
+
+class ContextBuildRequest(BaseModel):
+    """一次上下文编排请求：手填原料 + 可选的真实数据来源。"""
+
+    user_query: str = Field(min_length=1, description="当前用户问题（永远在上下文最末尾）")
+    user_id: str | None = Field(
+        default=None, description="传了就读真实长期画像当状态层；不传用手填 profile_text 或演示事实"
+    )
+    profile_text: str = Field(default="", description="手填画像文本（没有 user_id 时使用）")
+    short_memory: str = Field(default="", description="Day 06 的短期摘要（不传用示例摘要）")
+    rag_query: str | None = Field(
+        default=None, description="传了就真实混合检索知识库；不传用手填 rag_blocks 或课程演示块"
+    )
+    doc_id: str | None = Field(default=None, description="限定只检索该文档")
+    top_k: int = Field(default=4, ge=1, le=10, description="真实检索的候选块数")
+    alpha: float = Field(default=0.5, ge=0, le=1, description="检索的向量路权重")
+    rag_blocks: list[ContextBlockIn] = Field(
+        default_factory=list, description="手填检索块（含重复块可观察去重）"
+    )
+    tool_data: str = Field(default="", description="工具实时数据（已 digest）")
+    history: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="历史消息 [{role, content, tool_calls?, tool_call_id?}]；可塞孤儿 tool 消息观察自检",
+    )
+    hard_constraints: list[str] = Field(
+        default_factory=list, description="需要在尾部复述的硬约束（超过 3 条会报警）"
+    )
+    system_prompt: str | None = Field(default=None, description="不传用课程默认客服规则")
+    with_tools: bool = Field(default=True, description="是否注入真实工具说明书（观察隐性成本）")
+    total_budget: int = Field(default=16000, ge=1000, le=128000, description="上下文硬上限（token）")
+    debug: bool = Field(default=True, description="是否产出整体 dump（开发模式的听诊器）")
+
+
+class ContextPartOut(BaseModel):
+    """层内一个分区的预算账单。"""
+
+    name: str
+    tokens: int = Field(description="实际占用 token")
+    budget: int = Field(description="该分区预算 token")
+    note: str = ""
+
+
+class ContextLayerOut(BaseModel):
+    """一层编排结果：预算、占用、最终文本。"""
+
+    key: str = Field(description="instruction / state / knowledge / history")
+    name: str
+    position: str = Field(description="该层在上下文里的位置说明")
+    budget: int
+    used: int
+    content: str
+    parts: list[ContextPartOut] = Field(default_factory=list)
+
+
+class ContextBlockTraceOut(BaseModel):
+    """一个检索块的命运（去重 / 裁剪 / 摆放位置）。"""
+
+    title: str
+    chunk_index: int
+    score: float
+    action: str = Field(description="保留 / 裁剪装填 / 去重丢弃 / 预算不足丢弃")
+    tokens: int
+    text: str
+    position: int | None = Field(default=None, description="在知识层的摆放位次（1 = 头）")
+    detail: str = ""
+
+
+class ContextCheckOut(BaseModel):
+    """退化自检清单的一项。"""
+
+    no: int
+    question: str
+    signal: str = Field(description="机器可查的信号")
+    ok: bool
+    detail: str
+
+
+class ContextBuildResult(BaseModel):
+    """编排结果：给模型的上下文 + 给人类审查的账单与自检报告。"""
+
+    context: str
+    total_budget: int
+    used_tokens: int
+    usage_ratio: float
+    layers: list[ContextLayerOut]
+    blocks: list[ContextBlockTraceOut] = Field(description="检索块的裁剪 / 摆放轨迹")
+    checks: list[ContextCheckOut] = Field(description="七问自检结果")
+    warnings: list[str] = Field(description="预算超限 / 裁剪 / 配对异常等报警")
+    dump: str = Field(description="可直接肉眼审查的整体 dump（debug=true 时非空）")
+    sources: dict[str, str] = Field(
+        default_factory=dict, description="每样原料的真实来源说明（真实库 / 手填 / 演示）"
+    )
+    profile_text: str = Field(default="", description="本次使用的完整画像文本（未裁剪，便于对比）")

@@ -1,6 +1,7 @@
 """智能体开发学习接口：工具清单、工具调用日志、Agent 循环、ReAct、结构化输出、多轮会话。
 
-所有接口都没有落库行为——学习页是"试验台"，会话状态只活在进程内存里，重启即清。
+除 Day 07 的长期记忆与知识库外，其余接口都不落库——学习页是"试验台"，
+会话状态只活在进程内存里，重启即清。
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +13,8 @@ from app.modules.study.crud import knowledge as knowledge_crud
 from app.modules.study.schemas.study import (
     AgentRunRequest,
     AgentRunResult,
+    ContextBuildRequest,
+    ContextBuildResult,
     Day07ChatRequest,
     Day07ChatResult,
     ExtractRunRequest,
@@ -36,6 +39,7 @@ from app.modules.study.schemas.study import (
 from app.modules.study.services import (
     agent_loop,
     day07_agent,
+    day08_context,
     long_memory,
     rag,
     react_loop,
@@ -363,4 +367,27 @@ async def chat_day07(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+# ---------- Day 08：上下文工程（四层编排器） ----------
+
+
+@router.post(
+    "/day08/context",
+    response_model=APIResponse[ContextBuildResult],
+    summary="Day 08 上下文编排：四层结构 + 预算账单 + 七问自检 + dump",
+)
+async def build_context(
+    payload: ContextBuildRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[ContextBuildResult]:
+    """只编排、不调模型：返回最终上下文、每层的预算账单、检索块的裁剪与摆放轨迹、七问自检结果。
+
+    这样迭代上下文逻辑不必等模型回答（也不花 token）——"模型变笨"时先看 dump，
+    确认约束还在、检索块没丢进中部、历史没被拦腰斩断，再去怀疑模型本身。
+    """
+    try:
+        result = await day08_context.build(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return APIResponse(data=result)

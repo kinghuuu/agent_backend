@@ -101,6 +101,15 @@ async def list_facts(db: AsyncSession, user_id: str) -> list[dict[str, Any]]:
     return [_fact_out(obj) for obj in await crud.list_by_user(db, user_id)]
 
 
+def fact_line(fact: dict[str, Any]) -> str:
+    """单条事实的注入格式。
+
+    抽成函数是为了让 Day 08 的画像预算裁剪（按条装填）产出与 ``recall_prompt``
+    完全一致的文本——同一份画像，两处格式化不能长得不一样。
+    """
+    return f"- {fact['key']}: {fact['value']}（更新于 {fact.get('updated_at') or '未知'}）"
+
+
 def recall_prompt(facts: list[dict[str, Any]]) -> str:
     """把画像拼成 system 注入文本；没有记忆时返回空串。
 
@@ -108,11 +117,7 @@ def recall_prompt(facts: list[dict[str, Any]]) -> str:
     """
     if not facts:
         return ""
-    lines = [
-        f"- {item['key']}: {item['value']}（更新于 {item['updated_at'] or '未知'}）"
-        for item in facts
-    ]
-    return "【用户长期画像】\n" + "\n".join(lines)
+    return "【用户长期画像】\n" + "\n".join(fact_line(item) for item in facts)
 
 
 def detect_conflicts(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
