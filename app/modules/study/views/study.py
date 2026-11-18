@@ -17,6 +17,16 @@ from app.modules.study.schemas.study import (
     ContextBuildResult,
     Day07ChatRequest,
     Day07ChatResult,
+    Day09AgentRequest,
+    Day09AgentResult,
+    Day09LcelRequest,
+    Day09LcelResult,
+    Day09MappingResult,
+    Day09MessagesResult,
+    Day09PromptRequest,
+    Day09PromptResult,
+    Day09StructuredRequest,
+    Day09StructuredResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -40,6 +50,7 @@ from app.modules.study.services import (
     agent_loop,
     day07_agent,
     day08_context,
+    day09_langchain,
     long_memory,
     rag,
     react_loop,
@@ -390,4 +401,99 @@ async def build_context(
         result = await day08_context.build(db, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+# ---------- Day 09 LangChain 初探（框架篇开篇） ----------
+
+
+@router.get(
+    "/day09/mapping",
+    response_model=APIResponse[Day09MappingResult],
+    summary="Day 09 零件对照表（手写 ↔ 框架）+ 依赖版本",
+)
+async def get_day09_mapping() -> APIResponse[Day09MappingResult]:
+    """返回静态概念数据：手写零件与 LangChain 零件的对应关系、消息模式对照、预设问题。"""
+    return APIResponse(data=await day09_langchain.mapping())
+
+
+@router.post(
+    "/day09/messages",
+    response_model=APIResponse[Day09MessagesResult],
+    summary="Day 09 消息抽象：裸 dict → 类型对象（不调模型）",
+)
+async def run_day09_messages() -> APIResponse[Day09MessagesResult]:
+    """构造四类消息对象并转回 OpenAI 格式，演示"role 拼错"在两种世界里的不同结局。"""
+    try:
+        result = day09_langchain.messages_demo()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day09/prompt",
+    response_model=APIResponse[Day09PromptResult],
+    summary="Day 09 ChatPromptTemplate：变量 / partial / fail-fast（不调模型）",
+)
+async def run_day09_prompt(payload: Day09PromptRequest) -> APIResponse[Day09PromptResult]:
+    """填充模板变量；勾选"故意漏填"可看到模板在 invoke 阶段就 KeyError。"""
+    try:
+        result = day09_langchain.prompt_demo(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day09/structured",
+    response_model=APIResponse[Day09StructuredResult],
+    summary="Day 09 with_structured_output：三字段回执抽取",
+)
+async def run_day09_structured(
+    payload: Day09StructuredRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day09StructuredResult]:
+    """把 Pydantic 模型交给 with_structured_output，返回解析结果、下发 Schema 与抖动字段。"""
+    try:
+        result = await day09_langchain.run_structured(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day09/lcel",
+    response_model=APIResponse[Day09LcelResult],
+    summary="Day 09 LCEL 管道：invoke / stream / batch / retry / lambda",
+)
+async def run_day09_lcel(
+    payload: Day09LcelRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day09LcelResult]:
+    """跑一次 LCEL 管道，返回组件链、回答、分片（stream）、批量耗时对比（batch）与重试轨迹。"""
+    try:
+        result = await day09_langchain.run_lcel(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day09/agent",
+    response_model=APIResponse[Day09AgentResult],
+    summary="Day 09 框架版 Agent 循环：@tool + bind_tools + MAX_STEPS",
+)
+async def run_day09_agent(
+    payload: Day09AgentRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day09AgentResult]:
+    """用 LangChain 消息对象重写 Day 01 的循环；可切换工具 description 变体观察选错工具。"""
+    try:
+        result = await day09_langchain.run_agent(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
     return APIResponse(data=result)

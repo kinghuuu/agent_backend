@@ -512,3 +512,162 @@ class ContextBuildResult(BaseModel):
         default_factory=dict, description="每样原料的真实来源说明（真实库 / 手填 / 演示）"
     )
     profile_text: str = Field(default="", description="本次使用的完整画像文本（未裁剪，便于对比）")
+
+
+# ---------- Day 09 LangChain 初探 ----------
+
+
+class Day09CustomerReply(BaseModel):
+    """结构化抽取的合同（练习 1）：with_structured_output 直接吃这个模型。
+
+    每个 ``Field(description=...)`` 都会被转成 JSON Schema 下发——
+    它就是 Day 04 说的"参数说明书"，写得越具体抽取越稳。
+    """
+
+    reply: str = Field(description="给用户的回复，一句话给出关键结论")
+    sentiment: Literal["positive", "neutral", "negative"] = Field(description="用户情绪")
+    needs_escalation: bool = Field(description="是否需要转人工（投诉/赔偿/监管风险时为 true）")
+
+
+class Day09PromptRequest(BaseModel):
+    """Prompt 模板演示请求。"""
+
+    company: str = Field(default="极星科技", max_length=50, description="partial 冻结的公司名")
+    question: str = Field(default="XR-500 Pro 退款要运费吗？", min_length=1, description="模板变量 question")
+    history: list[dict[str, Any]] = Field(
+        default_factory=list, description="占位到 placeholder 的历史消息 [{role, content}]"
+    )
+    omit_variable: bool = Field(
+        default=False, description="故意漏填 history，观察模板的 fail-fast（课程轨迹二）"
+    )
+
+
+class Day09StructuredRequest(BaseModel):
+    """结构化输出请求：可重复跑同一输入，观察字段抖动（练习 1）。"""
+
+    text: str = Field(
+        min_length=1,
+        description="待抽取的用户原话",
+        examples=["你们客服态度太差了，我要投诉！订单 SO20261101001 到现在还没发货"],
+    )
+    repeat: int = Field(default=1, ge=1, le=3, description="重复次数：>1 可对比同一输入的字段稳定性")
+    temperature: float = Field(default=0.0, ge=0, le=2, description="坑 4：>0 时结构化抽取会抖")
+    method: Literal["auto", "default", "function_calling", "json_mode"] = Field(
+        default="auto",
+        description="结构化输出的下发方式：auto 按 json_schema → function_calling → json_mode 自动降级",
+    )
+    model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+
+
+class Day09LcelRequest(BaseModel):
+    """LCEL 管道演示请求。"""
+
+    question: str = Field(default="什么是 Function Calling？", min_length=1)
+    mode: Literal["invoke", "stream", "batch", "retry", "lambda"] = Field(
+        default="invoke",
+        description="invoke 单次 / stream 流式 / batch 并发批量 / retry 重试（纯本地） / lambda 管道插函数",
+    )
+    batch_questions: list[str] = Field(
+        default_factory=list, description="batch 模式的输入列表（留空用课程三条）"
+    )
+    compare_serial: bool = Field(
+        default=False, description="batch 模式下再串行跑一遍，对比并发与串行耗时"
+    )
+    model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+
+
+class Day09AgentRequest(BaseModel):
+    """框架版 Agent 循环请求。"""
+
+    question: str = Field(
+        default="订单 SO20261101001 发货了吗？", min_length=1, description="用户问题"
+    )
+    variant: Literal["full", "vague", "missing"] = Field(
+        default="full",
+        description="工具 description 变体：full 写全 / vague 只剩『查询。』 / missing 无 docstring（定义即报错）",
+    )
+    max_steps: int = Field(
+        default=6, ge=1, le=15, description="步数保险丝：框架不自带终止条件，必须自己装"
+    )
+    model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+
+
+class Day09MessagesResult(BaseModel):
+    """消息抽象演示结果。"""
+
+    messages: list[dict[str, Any]] = Field(description="四类消息：type / openai_role / content / note")
+    openai_payload: list[dict[str, Any]] = Field(description="convert_to_openai_messages 的输出")
+    roundtrip_note: str
+    dict_vs_typed: list[dict[str, str]] = Field(description="裸 dict 与类型对象的差别对照")
+    raw_typo: dict[str, Any] = Field(description="反例：role 拼成 assitant 仍能构造")
+    typed_error: str = Field(description="正例：ToolMessage 缺 tool_call_id 在构造时就校验失败")
+    extra_ignored: str = Field(description="补充：多传的未知 kwargs 会被 pydantic 静默忽略")
+    part_mapping: list[dict[str, str]] = Field(description="手写零件 ↔ 框架零件对照表")
+
+
+class Day09PromptResult(BaseModel):
+    """Prompt 模板演示结果。"""
+
+    input_variables: list[str] = Field(description="模板要求的变量（漏填会 KeyError）")
+    optional_variables: list[str] = Field(
+        default_factory=list, description="placeholder 变量：缺失即跳过，不参与必填校验"
+    )
+    partial_frozen: list[str] = Field(description="被 partial 冻结的变量")
+    messages: list[dict[str, Any]] = Field(description="填充后的消息（type / content / source）")
+    error: str | None = Field(default=None, description="漏填变量时捕获到的错误原文")
+    error_hint: str
+    part_mapping: list[dict[str, str]]
+
+
+class Day09StructuredResult(BaseModel):
+    """结构化输出结果：合同 + 每次尝试 + 抖动字段。"""
+
+    schema_sent: dict[str, Any] = Field(description="下发给模型的 JSON Schema（Field description 就在里面）")
+    attempts: list[dict[str, Any]] = Field(description="每次尝试：三字段 + 实际方式 + 耗时 + 错误")
+    unstable_fields: list[str] = Field(description="重复跑时取值不一致的字段（temperature>0 才会出现）")
+    method_used: str = Field(description="最终生效的下发方式：default / function_calling / json_mode")
+    methods_tried: list[str] = Field(description="降级轨迹（失败现场）")
+    model: str
+    elapsed_ms: int
+    note: str
+    part_mapping: list[dict[str, str]]
+
+
+class Day09LcelResult(BaseModel):
+    """LCEL 管道结果。"""
+
+    mode: str
+    chain: list[dict[str, Any]] = Field(description="管道上的每个组件与职责（竖线的左边到右边）")
+    answer: str
+    chunks: list[str] = Field(default_factory=list, description="stream 模式的分片")
+    chunk_count: int = 0
+    elapsed_ms: int
+    batch: list[dict[str, Any]] = Field(default_factory=list, description="batch 模式每个问题的回答")
+    batch_ms: int | None = Field(default=None, description="并发批量耗时")
+    serial_ms: int | None = Field(default=None, description="串行对照耗时")
+    retry_trace: list[dict[str, Any]] = Field(default_factory=list, description="with_retry 的重试轨迹")
+    note: str
+    part_mapping: list[dict[str, str]]
+
+
+class Day09AgentResult(BaseModel):
+    """框架版 Agent 循环轨迹。"""
+
+    steps: list[dict[str, Any]] = Field(description="每步：tool_calls（id/name/args/result/is_error）或 content")
+    final_answer: str
+    stop_reason: str = Field(description="completed / max_steps / tool_schema_error")
+    tool_schemas: list[dict[str, Any]] = Field(description="bind_tools 真实下发的 schema（description 权重看这里）")
+    variant_note: str
+    messages_count: int = Field(description="messages 累计条数（含 ToolMessage 回填）")
+    model: str
+    elapsed_ms: int
+
+
+class Day09MappingResult(BaseModel):
+    """Day 09 静态概念数据（对照表 / 预设问题 / 依赖版本）。"""
+
+    part_mapping: list[dict[str, str]]
+    dict_vs_typed: list[dict[str, str]]
+    agent_presets: list[str]
+    install_hint: str
+    langchain_version: str
