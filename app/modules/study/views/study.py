@@ -37,6 +37,23 @@ from app.modules.study.schemas.study import (
     Day10ReactRequest,
     Day10ReactResult,
     Day10StateResult,
+    Day11ApprovalResumeRequest,
+    Day11ApprovalResumeResult,
+    Day11ApprovalStartRequest,
+    Day11ApprovalStartResult,
+    Day11BasicRequest,
+    Day11BasicResult,
+    Day11ChatRequest,
+    Day11ChatResult,
+    Day11ExpireRequest,
+    Day11ExpireResult,
+    Day11MappingResult,
+    Day11PendingOut,
+    Day11ReplayResult,
+    Day11SqliteRequest,
+    Day11SqliteResult,
+    Day11TimeTravelRequest,
+    Day11TimeTravelResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -62,6 +79,7 @@ from app.modules.study.services import (
     day08_context,
     day09_langchain,
     day10_langgraph,
+    day11_checkpointer,
     long_memory,
     rag,
     react_loop,
@@ -608,4 +626,170 @@ async def run_day10_parallel(payload: Day10ParallelRequest) -> APIResponse[Day10
         result = await day10_langgraph.run_parallel(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+# ---------- Day 11 Checkpointer 与人机协同 ----------
+
+
+@router.get(
+    "/day11/mapping",
+    response_model=APIResponse[Day11MappingResult],
+    summary="Day 11 概念数据：快照四要素 / 两套暂停机制 / 三档存档器 / 六个坑 + 版本",
+)
+async def get_day11_mapping() -> APIResponse[Day11MappingResult]:
+    """返回静态概念数据：StateSnapshot 四要素、动态中断与静态断点对照、存档器选型、六个坑。"""
+    return APIResponse(data=await day11_checkpointer.mapping())
+
+
+@router.post(
+    "/day11/basic",
+    response_model=APIResponse[Day11BasicResult],
+    summary="Day 11 存档三实验：同 thread 续跑 / 跨 thread 隔离 / get_state 快照",
+)
+async def run_day11_basic(
+    payload: Day11BasicRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day11BasicResult]:
+    """课程 01：两次 invoke 只带新消息，验证 turns 与历史来自存档帧而不是 Python 变量。"""
+    try:
+        result = await day11_checkpointer.run_basic(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day11/chat",
+    response_model=APIResponse[Day11ChatResult],
+    summary="Day 11 交互式续跑：同 thread_id 跨请求读档（MemorySaver）",
+)
+async def chat_day11(
+    payload: Day11ChatRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day11ChatResult]:
+    """每轮只传一条 HumanMessage 和同一个 thread_id；历史与计数由 checkpointer 带回来。"""
+    try:
+        result = await day11_checkpointer.chat(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day11/approval/start",
+    response_model=APIResponse[Day11ApprovalStartResult],
+    summary="Day 11 确认门：命中敏感工具后 interrupt() 冻结并存档",
+)
+async def start_day11_approval(
+    payload: Day11ApprovalStartRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day11ApprovalStartResult]:
+    """图停在 approval 节点，返回待审批载荷；进程可以死，thread_id 不变就能继续。"""
+    try:
+        result = await day11_checkpointer.start_approval(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day11/approval/resume",
+    response_model=APIResponse[Day11ApprovalResumeResult],
+    summary="Day 11 恢复审批：Command(resume=...) 续跑（支持改参数后放行）",
+)
+async def resume_day11_approval(
+    payload: Day11ApprovalResumeRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day11ApprovalResumeResult]:
+    """decision=true 放行 / false 拦截 / 对象表示人工改过参数。
+
+    注意：恢复时 approval 节点会从头重放，但它里面只有 interrupt，所以不会重复扣款。
+    """
+    try:
+        result = await day11_checkpointer.resume_approval(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.get(
+    "/day11/approval/pending",
+    response_model=APIResponse[list[Day11PendingOut]],
+    summary="Day 11 练习 3：待审批队列（含已等待秒数）",
+)
+async def list_day11_pending() -> APIResponse[list[Day11PendingOut]]:
+    """列出所有停在 approval 的会话；wait_seconds 超过 86400 即视为超时。"""
+    return APIResponse(data=[Day11PendingOut(**row) for row in day11_checkpointer.list_pending()])
+
+
+@router.post(
+    "/day11/approval/expire",
+    response_model=APIResponse[Day11ExpireResult],
+    summary="Day 11 练习 3：审批超时自动驳回（Command(resume=False)）",
+)
+async def expire_day11_approvals(
+    payload: Day11ExpireRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day11ExpireResult]:
+    """模拟定时任务：扫描等待超时的会话，自动拒绝并让模型生成"审批超时已驳回"的回复。"""
+    try:
+        result = await day11_checkpointer.expire_approvals(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day11/replay",
+    response_model=APIResponse[Day11ReplayResult],
+    summary="Day 11 坑 1：interrupt 前有副作用会被重放两次（纯本地）",
+)
+async def run_day11_replay() -> APIResponse[Day11ReplayResult]:
+    """对照实验：副作用写在 interrupt 之前（执行 2 次）vs 拆成决策/审批/执行（执行 1 次）。"""
+    try:
+        result = await day11_checkpointer.replay_demo()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day11/time-travel",
+    response_model=APIResponse[Day11TimeTravelResult],
+    summary="Day 11 时间旅行：get_state_history → update_state → invoke(None)",
+)
+async def run_day11_time_travel(
+    payload: Day11TimeTravelRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day11TimeTravelResult]:
+    """从 answer 之前的那一帧改写 topic 后重跑，原历史帧保留（分叉不是覆盖）。"""
+    try:
+        result = await day11_checkpointer.run_time_travel(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day11/sqlite",
+    response_model=APIResponse[Day11SqliteResult],
+    summary="Day 11 落盘存档：AsyncSqliteSaver，换连接（≈ 换进程）仍能续跑",
+)
+async def run_day11_sqlite(
+    payload: Day11SqliteRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day11SqliteResult]:
+    """每次请求重开 SQLite 连接并重新编译图，历史从 var/day11_checkpoints.db 读。"""
+    try:
+        result = await day11_checkpointer.run_sqlite(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
     return APIResponse(data=result)

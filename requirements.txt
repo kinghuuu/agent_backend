@@ -26,3 +26,5 @@ langchain==1.5.0
 langchain-openai==1.8.1
 # 框架篇（Day 10 起：LangGraph 状态图 —— 有环的控制流、条件边、并行扇出）
 langgraph==1.2.22
+# 框架篇（Day 11 起：Checkpointer 落盘存档 —— 进程重启后仍能续跑）
+langgraph-checkpoint-sqlite==3.1.3

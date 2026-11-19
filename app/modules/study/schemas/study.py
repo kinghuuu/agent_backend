@@ -857,3 +857,220 @@ class Day10MappingResult(BaseModel):
     presets: dict[str, list[str]]
     install_hint: str
     langgraph_version: str
+
+
+# ---------- Day 11 Checkpointer 与人机协同 ----------
+
+
+class Day11BasicRequest(BaseModel):
+    """课程 01 的三个实验：续跑 / 隔离 / 快照。"""
+
+    first_message: str = Field(default="我叫小胡，最喜欢的数字是 7", min_length=1)
+    second_message: str = Field(default="我叫什么？最喜欢的数字是多少？", min_length=1)
+    isolation_question: str = Field(
+        default="我叫什么？", min_length=1, description="换一个 thread_id 后问同一问题，验证隔离"
+    )
+    model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+
+
+class Day11BasicResult(BaseModel):
+    """三个实验的完整现场：两轮回答 + 隔离回答 + 两边的快照 + 历史帧。"""
+
+    thread_id: str
+    other_thread_id: str
+    first_reply: str
+    second_reply: str = Field(description="同 thread 第二轮：应当记得第一轮的名字与数字")
+    isolated_reply: str = Field(description="另一个 thread：应当表示不知道")
+    turns: int = Field(description="第二轮结束后的 turns：2 说明 state 没被重置")
+    messages_count: int = Field(description="第二轮结束后的消息条数：4 说明历史没丢")
+    snapshot: dict[str, Any] = Field(description="最近一帧：values / next / tasks / created_at")
+    other_snapshot: dict[str, Any]
+    frames: list[dict[str, Any]] = Field(description="thread A 的历史帧（新的在前）")
+    graph: Day10GraphStructure
+    notes: list[str]
+    model: str
+    elapsed_ms: int
+
+
+class Day11ChatRequest(BaseModel):
+    """交互式续聊：同一 thread_id 的多次请求共享存档。"""
+
+    message: str = Field(min_length=1, description="本轮用户输入")
+    thread_id: str | None = Field(
+        default=None, description="会话 ID；不传则新建（返回值里给出，可继续追问）"
+    )
+    reset: bool = Field(default=False, description="先删掉该 thread 的全部存档再跑（重置会话）")
+    model_config_id: int | None = None
+
+
+class Day11ChatResult(BaseModel):
+    """一轮续聊结果：回答 + 计数 + 快照 + 历史帧。"""
+
+    thread_id: str
+    reply: str
+    turns: int
+    messages_count: int
+    is_new_thread: bool
+    snapshot: dict[str, Any]
+    frames: list[dict[str, Any]]
+    model: str
+    elapsed_ms: int
+
+
+class Day11ApprovalStartRequest(BaseModel):
+    """发起一次需要人工审批的操作。"""
+
+    question: str = Field(
+        default="订单 A1001 不想要了，请直接帮我退款 299 元",
+        min_length=1,
+        description="要明确要求退款，模型才会调用敏感工具 refund_order",
+    )
+    thread_id: str | None = Field(default=None, description="不传则新建；恢复时必须用同一个")
+    model_config_id: int | None = None
+
+
+class Day11ApprovalStartResult(BaseModel):
+    """第一次调用：图停在 approval（或没有敏感调用直接跑完）。"""
+
+    thread_id: str
+    paused: bool = Field(description="True 表示命中 interrupt，图已冻结并存档")
+    next: list[str] = Field(description="接下来要跑的节点：暂停时是 ('approval',)")
+    interrupt: dict[str, Any] | None = Field(default=None, description="interrupt 发出的待审批载荷")
+    answer: str = Field(default="", description="未暂停时的最终回答")
+    snapshot: dict[str, Any]
+    graph: Day10GraphStructure
+    note: str
+    model: str
+    elapsed_ms: int
+
+
+class Day11ApprovalResumeRequest(BaseModel):
+    """人工审批结果：true 放行 / false 拦截 / 对象表示改参数后放行（练习 2）。"""
+
+    thread_id: str = Field(min_length=1)
+    decision: bool | dict[str, Any] = Field(
+        default=True,
+        description="true / false / {'amount': 199}——对象会覆盖模型原始参数",
+    )
+    model_config_id: int | None = None
+
+
+class Day11ApprovalResumeResult(BaseModel):
+    """恢复后的结果：最终回答 + 工具是否执行 + 被改过的参数。"""
+
+    thread_id: str
+    approved: bool
+    patched_args: dict[str, Any] = Field(description="人工改过的参数（空 dict 表示没改）")
+    final_answer: str
+    tool_results: list[dict[str, Any]] = Field(description="每个 ToolMessage：工具名 / 内容 / 是否被拦截")
+    next: list[str] = Field(description="恢复后应当为空（图跑完了）")
+    messages_count: int
+    note: str
+    model: str
+    elapsed_ms: int
+
+
+class Day11PendingOut(BaseModel):
+    """一条待审批记录（练习 3 的审批队列）。"""
+
+    thread_id: str
+    question: str
+    tool: str
+    args: dict[str, Any]
+    wait_seconds: float = Field(description="已等待秒数：超过 86400 即为超时")
+    created_at: str | None = None
+
+
+class Day11ExpireRequest(BaseModel):
+    """模拟定时任务扫描超时审批并自动驳回。"""
+
+    thread_id: str | None = Field(default=None, description="只处理该会话；不传处理全部符合条件者")
+    max_age_seconds: float = Field(
+        default=0,
+        ge=0,
+        description="等待超过该秒数即视为超时；0 = 课堂演示（队列里的都当已超时），生产填 86400",
+    )
+    model_config_id: int | None = None
+
+
+class Day11ExpireResult(BaseModel):
+    """自动驳回结果。"""
+
+    expired: list[dict[str, Any]] = Field(description="每个会话：等待时长 + 自动驳回后的回答")
+    remaining: int = Field(description="处理完后仍在等待审批的会话数")
+    note: str
+
+
+class Day11ReplayResult(BaseModel):
+    """节点重放与副作用对照实验（纯本地）。"""
+
+    experiments: list[dict[str, Any]] = Field(description="反面 / 正面：暂停前后副作用执行次数")
+    rules: list[str]
+    note: str
+
+
+class Day11TimeTravelRequest(BaseModel):
+    """时间旅行：换主题后从 answer 之前的那一帧重跑。"""
+
+    topic: str = Field(default="RAG", min_length=1, description="第一次运行的主题")
+    new_topic: str = Field(default="MCP 协议", min_length=1, description="改写后重跑的主题")
+    model_config_id: int | None = None
+
+
+class Day11TimeTravelResult(BaseModel):
+    """时间旅行结果：两个回答 + 分叉前后的帧列表。"""
+
+    thread_id: str
+    original_answer: str
+    new_answer: str
+    frames_before: list[dict[str, Any]]
+    frames_after: list[dict[str, Any]] = Field(description="分叉后：新旧两条链的帧都在")
+    fork_checkpoint_id: str = Field(description="从哪一帧分叉（answer 之前）")
+    original_preserved: bool = Field(description="原历史的最后一帧是否仍在（分叉不是覆盖）")
+    note: str
+    model: str
+    elapsed_ms: int
+
+
+class Day11SqliteRequest(BaseModel):
+    """SQLite 落盘实验：两次请求等价于两次进程。"""
+
+    mode: Literal["first", "resume"] = Field(
+        default="first", description="first 写入一轮 / resume 只带新消息，历史从文件读"
+    )
+    thread_id: str = Field(default="sqlite-user-42", min_length=1)
+    message: str | None = Field(default=None, description="不传用课程预设的两句话")
+    reset: bool = Field(default=False, description="先删除该 thread 的落盘存档（重新演示）")
+    model_config_id: int | None = None
+
+
+class Day11SqliteResult(BaseModel):
+    """SQLite 实验的返回：落盘位置 + 回答 + 快照 + 历史帧。"""
+
+    mode: str
+    thread_id: str
+    db_path: str
+    db_size_kb: float
+    reply: str
+    turns: int
+    messages_count: int
+    snapshot: dict[str, Any]
+    frames: list[dict[str, Any]]
+    note: str
+    model: str
+    elapsed_ms: int
+
+
+class Day11MappingResult(BaseModel):
+    """Day 11 静态概念数据（快照四要素 / 两套暂停机制 / 三档存档器 / 六个坑 / 版本）。"""
+
+    snapshot_fields: list[dict[str, str]]
+    pause_mechanisms: list[dict[str, str]]
+    savers: list[dict[str, str]]
+    pitfalls: list[dict[str, str]]
+    time_travel_steps: list[str]
+    rules: list[str]
+    presets: dict[str, list[str]]
+    install_hint: str
+    langgraph_version: str
+    checkpoint_sqlite_version: str

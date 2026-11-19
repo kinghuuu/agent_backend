@@ -5,3 +5,5 @@ venv/
 .env
 .pytest_cache/
 .static/
+# Day 11 起：学习页的 SQLite 存档文件（运行时生成，重启后仍保留是本意）
+var/
