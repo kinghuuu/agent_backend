@@ -671,3 +671,189 @@ class Day09MappingResult(BaseModel):
     agent_presets: list[str]
     install_hint: str
     langchain_version: str
+
+
+# ---------- Day 10 LangGraph 状态图 ----------
+
+
+class Day10Intent(BaseModel):
+    """意图分类合同（练习 1）：直接交给 with_structured_output。
+
+    ``confidence`` 是关键：路由函数用它在"答得动"和"转人工"之间做选择。
+    ``Literal`` 锁死取值范围，是为了让条件边的路由表不会漏 key——类型层面的约束
+    比运行时兜底便宜。
+    """
+
+    intent: Literal["order", "policy", "chat"] = Field(
+        description="order=查订单物流；policy=问退款/保修政策；chat=闲聊"
+    )
+    confidence: float = Field(ge=0, le=1, description="对本次判断的把握，0~1；拿不准就给低分")
+    order_id: str = Field(default="", description="若为 order，提取订单号，形如 SO20261101001")
+
+
+class Day10MinGraphRequest(BaseModel):
+    """最小线性图请求。"""
+
+    question: str = Field(
+        default="XR-500 Pro 保修多久？",
+        min_length=1,
+        description="用户问题（知识库里只有『保修』『退款』两个关键词能命中）",
+    )
+    model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+
+
+class Day10ConditionalRequest(BaseModel):
+    """条件边路由请求。"""
+
+    questions: list[str] = Field(
+        default_factory=lambda: ["SO20261101001 到哪了？", "能退款吗？", "你们几点上班？"],
+        description="依次跑的问题列表，每个问题独立走一遍图",
+    )
+    threshold: float = Field(
+        default=0.6,
+        ge=0,
+        le=1,
+        description="练习 1 的开关：置信度低于该值就走『转人工』分支（调高它就能看到 handoff）",
+    )
+    model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+
+
+class Day10ReactRequest(BaseModel):
+    """完整 ReAct 环请求。"""
+
+    question: str = Field(
+        default="帮我查下 SO20261101001 到哪了，顺便说下 XR-500 Pro 的退款政策",
+        min_length=1,
+    )
+    recursion_limit: int = Field(
+        default=12,
+        ge=2,
+        le=40,
+        description="物理保险丝：数的是**超步**（agent→tools→agent 一次往返吃 3 个），默认 25",
+    )
+    step_limit: int = Field(
+        default=6,
+        ge=1,
+        le=20,
+        description="语义刹车（练习 2）：agent 步数到顶就转 degrade 节点，别等 recursion_limit 硬停",
+    )
+    tool_mode: Literal["ok", "broken"] = Field(
+        default="ok",
+        description="broken 让工具永远返回错误——用它验证『6 步后是否优雅收尾』",
+    )
+    as_subgraph: bool = Field(
+        default=False,
+        description="练习 3：把 agent+tools 打包成子图，外层图用条件边判断子图是否收敛",
+    )
+    model_config_id: int | None = Field(default=None, description="指定模型，不传用默认 LLM")
+
+
+class Day10ParallelRequest(BaseModel):
+    """并行扇出请求（纯本地假检索，不花 token）。"""
+
+    query: str = Field(
+        default="退款；订单物流；发票政策",
+        min_length=1,
+        description="检索词；用分号分隔的子查询决定 Send 的分支数量",
+    )
+
+
+class Day10GraphStructure(BaseModel):
+    """可渲染的图结构：节点、边（含条件边标注）、mermaid 源码、ascii 图。"""
+
+    nodes: list[str]
+    edges: list[dict[str, Any]] = Field(description="source / target / conditional / label")
+    mermaid: str = Field(description="draw_mermaid() 源码，可直接贴进文档或 PR")
+    ascii: str = Field(default="", description="draw_ascii() 结果（需要额外装 grandalf）")
+    ascii_hint: str = Field(default="", description="ascii 画不出来时的原因/安装提示")
+
+
+class Day10StateExperimentOut(BaseModel):
+    """一个 reducer 对照实验的完整现场。"""
+
+    key: str
+    title: str
+    state_def: str = Field(description="这个实验的 State 字段声明（唯一的差别就在这一行）")
+    patches: list[dict[str, Any]] = Field(description="逐节点：received（读到的状态）/ patch（交的补丁）")
+    result: Any = Field(description="图跑完的最终状态")
+    verdict: str = Field(description="结论：覆盖 / 追加 / 同 id 更新 / 重复追加")
+
+
+class Day10StateResult(BaseModel):
+    """01 状态与 reducer 实验（不调模型）。"""
+
+    experiments: list[Day10StateExperimentOut]
+    reducer_table: list[dict[str, str]]
+    triple_pieces: list[dict[str, str]]
+    takeaway: str
+
+
+class Day10MinGraphResult(BaseModel):
+    """02 最小线性图结果。"""
+
+    graph: Day10GraphStructure
+    events: list[dict[str, Any]] = Field(description="updates（补丁）与 values（完整状态）交替的多条事件")
+    trace: list[str] = Field(description="靠 operator.add 累积的审计字段")
+    docs: list[str]
+    answer: str
+    model: str
+    elapsed_ms: int
+    note: str
+    while_mapping: list[dict[str, str]] = Field(description="手写 while ↔ 图 的逐行对照表")
+
+
+class Day10ConditionalResult(BaseModel):
+    """03 条件边路由结果。"""
+
+    graph: Day10GraphStructure
+    runs: list[dict[str, Any]] = Field(description="每个问题：intent / confidence / path / answer")
+    threshold: float
+    model: str
+    elapsed_ms: int
+    note: str
+
+
+class Day10ReactResult(BaseModel):
+    """04 完整 ReAct 环结果。"""
+
+    graph: Day10GraphStructure
+    events: list[dict[str, Any]] = Field(
+        description="每个节点提交了什么（scope 为子图命名空间，as_subgraph=true 时才有值）"
+    )
+    final_answer: str
+    stop_reason: str = Field(description="completed / degraded / recursion_limit / unfinished")
+    degraded: bool
+    recursion_limit: int
+    step_limit: int
+    outer_steps: int = Field(description="外层超步数：recursion_limit 数的就是它")
+    as_subgraph: bool
+    tool_mode: str
+    messages_count: int
+    model: str
+    elapsed_ms: int
+    note: str
+    while_mapping: list[dict[str, str]]
+
+
+class Day10ParallelResult(BaseModel):
+    """05 并行扇出 / 汇聚结果（静态 + Send 动态 + 子图）。"""
+
+    static: dict[str, Any]
+    dynamic: dict[str, Any]
+    subgraph: dict[str, Any]
+    note: str
+    send_rules: list[str]
+
+
+class Day10MappingResult(BaseModel):
+    """Day 10 静态概念数据（三件套 / reducer / 对照表 / 六个坑 / 版本）。"""
+
+    triple_pieces: list[dict[str, str]]
+    reducer_table: list[dict[str, str]]
+    while_vs_graph: list[dict[str, str]]
+    stream_modes: list[dict[str, str]]
+    pitfalls: list[dict[str, str]]
+    send_rules: list[str]
+    presets: dict[str, list[str]]
+    install_hint: str
+    langgraph_version: str

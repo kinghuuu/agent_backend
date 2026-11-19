@@ -24,3 +24,5 @@ httpx==0.28.1
 # 框架篇（Day 09 起：LangChain 消息/模板/结构化输出/LCEL/工具）
 langchain==1.5.0
 langchain-openai==1.8.1
+# 框架篇（Day 10 起：LangGraph 状态图 —— 有环的控制流、条件边、并行扇出）
+langgraph==1.2.22

@@ -27,6 +27,16 @@ from app.modules.study.schemas.study import (
     Day09PromptResult,
     Day09StructuredRequest,
     Day09StructuredResult,
+    Day10ConditionalRequest,
+    Day10ConditionalResult,
+    Day10MappingResult,
+    Day10MinGraphRequest,
+    Day10MinGraphResult,
+    Day10ParallelRequest,
+    Day10ParallelResult,
+    Day10ReactRequest,
+    Day10ReactResult,
+    Day10StateResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -51,6 +61,7 @@ from app.modules.study.services import (
     day07_agent,
     day08_context,
     day09_langchain,
+    day10_langgraph,
     long_memory,
     rag,
     react_loop,
@@ -496,4 +507,105 @@ async def run_day09_agent(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+# ---------- Day 10 LangGraph 状态图 ----------
+
+
+@router.get(
+    "/day10/mapping",
+    response_model=APIResponse[Day10MappingResult],
+    summary="Day 10 概念数据：三件套 / reducer / while 对照 / 六个坑 + 版本",
+)
+async def get_day10_mapping() -> APIResponse[Day10MappingResult]:
+    """返回静态概念数据：State/Node/Edge 三件套、reducer 语义、手写 while 对照表、六个坑与预设问题。"""
+    return APIResponse(data=await day10_langgraph.mapping())
+
+
+@router.post(
+    "/day10/state",
+    response_model=APIResponse[Day10StateResult],
+    summary="Day 10 状态与 reducer：覆盖 vs 追加（不调模型）",
+)
+async def run_day10_state() -> APIResponse[Day10StateResult]:
+    """跑四个对照实验：无 reducer / operator.add / add_messages / 节点返回全量的坑。
+
+    这是今天最容易翻车的地方——"读语义对、写语义错"，print 一切正常但最终结果少一半。
+    """
+    try:
+        result = await day10_langgraph.state_reducer_demo()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day10/min-graph",
+    response_model=APIResponse[Day10MinGraphResult],
+    summary="Day 10 最小线性图：检索 → 生成 + 逐节点观察",
+)
+async def run_day10_min_graph(
+    payload: Day10MinGraphRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day10MinGraphResult]:
+    """跑 START → retrieve → generate → END，同时返回 updates（补丁）与 values（完整状态）事件。"""
+    try:
+        result = await day10_langgraph.run_min_graph(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day10/conditional",
+    response_model=APIResponse[Day10ConditionalResult],
+    summary="Day 10 条件边：classify + route + 四条分支（含低置信度转人工）",
+)
+async def run_day10_conditional(
+    payload: Day10ConditionalRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day10ConditionalResult]:
+    """决策与执行分离：classify 只打标签、route 只选路、四条分支各自收口。"""
+    try:
+        result = await day10_langgraph.run_conditional(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day10/react",
+    response_model=APIResponse[Day10ReactResult],
+    summary="Day 10 完整 ReAct 环：agent ⇄ tools + 双刹车 + 降级交付",
+)
+async def run_day10_react(
+    payload: Day10ReactRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day10ReactResult]:
+    """把 Day 01 的 while 循环变成一条回头边；三条出口：语义收敛 / 语义刹车 / 物理保险丝。
+
+    ``tool_mode=broken`` 验证 6 步后优雅收尾（练习 2）；``as_subgraph`` 把环打包成子图（练习 3）。
+    """
+    try:
+        result = await day10_langgraph.run_react(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day10/parallel",
+    response_model=APIResponse[Day10ParallelResult],
+    summary="Day 10 并行扇出/汇聚：静态 + Send 动态 + 子图（本地假检索）",
+)
+async def run_day10_parallel(payload: Day10ParallelRequest) -> APIResponse[Day10ParallelResult]:
+    """三件事一起看：扇出耗时取最大而非求和、Send 的分支数运行时决定、子图可当节点用。"""
+    try:
+        result = await day10_langgraph.run_parallel(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return APIResponse(data=result)
