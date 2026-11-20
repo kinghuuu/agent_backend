@@ -1074,3 +1074,176 @@ class Day11MappingResult(BaseModel):
     install_hint: str
     langgraph_version: str
     checkpoint_sqlite_version: str
+
+
+# ---------- Day 12 多智能体 Supervisor ----------
+
+
+class Day12SingleRequest(BaseModel):
+    """课程 01：一个"什么都会"的 Agent 怎么选错工具。"""
+
+    question: str = Field(
+        default="订单 A1001 签收几天了？按政策能不能退？帮我退掉，并给客户写一段说明。",
+        min_length=1,
+    )
+    toolset: Literal["wide", "narrow"] = Field(
+        default="wide",
+        description="wide 给全部 5 个工具（含退款）/ narrow 只给 3 个只读工具，用来对比越权与假收敛",
+    )
+    max_steps: int = Field(default=4, ge=1, le=8, description="循环步数上限")
+    model_config_id: int | None = None
+
+
+class Day12SingleResult(BaseModel):
+    """单 Agent 的执行现场：决策 / 工具调用 / 观察结果 + 复现出的失败点。"""
+
+    question: str
+    toolset: str
+    tools_available: list[str] = Field(description="这次交给模型的工具清单")
+    steps: list[dict[str, Any]] = Field(description="每步：decision（含 tool_calls）/ tool（观察结果）")
+    tool_counts: dict[str, int] = Field(description="各工具被真实调用的次数（refund_order=0 就是没退）")
+    final_answer: str
+    issues: list[str] = Field(description="三堵墙的可查证据：假收敛 / 越权 / 工具返回值被丢弃")
+    llm_calls: int
+    note: str
+    model: str
+    elapsed_ms: int
+
+
+class Day12SupervisorRequest(BaseModel):
+    """课程 02：最小可跑的 Supervisor（1 主管 + 2 专家 + FINISH）。"""
+
+    question: str = Field(
+        default="订单 A1001 签收几天了？按政策能不能退？给客户写一段说明。", min_length=1
+    )
+    max_handoff: int = Field(default=6, ge=1, le=20, description="交接预算：超过就强制收尾")
+    dedupe_guard: bool = Field(
+        default=True, description="练习 1：连续两次派给同一人且任务高度相似时跳过本次派单"
+    )
+    recursion_limit: int = Field(default=24, ge=6, le=80, description="超步数保险丝")
+    model_config_id: int | None = None
+
+
+class Day12SupervisorResult(BaseModel):
+    """主管模式的完整现场：派单时间线 / 结论账本 / 带 name 的消息流 / 预算与去重。"""
+
+    question: str
+    final_answer: str
+    findings: list[str] = Field(description="账本层：每个专家回传的一句话结论")
+    handoffs: list[dict[str, Any]] = Field(description="派单记录：role / task / reason")
+    events: list[dict[str, Any]] = Field(description="审计事件流：dispatch / expert / dedupe / budget / finish")
+    messages: list[dict[str, Any]] = Field(description="共享层消息流（专家的 AIMessage 带 name）")
+    steps: int = Field(description="已消耗的交接次数")
+    dedupe_skips: int = Field(description="去重守卫跳过的派单次数（练习 1）")
+    budget_hit: bool = Field(description="是否因交接预算耗尽而强制收尾")
+    llm_calls: int = Field(description="真实 LLM 调用次数（主管决策 + 专家子图步数）")
+    graph: Day10GraphStructure
+    note: str
+    model: str
+    elapsed_ms: int
+
+
+class Day12FullRequest(BaseModel):
+    """课程 03：加审批 + 加预算 + 加存档（生产形态）。"""
+
+    question: str = Field(
+        default="订单 A1001 签收3天，能不能退？退 299，顺便算 299*0.85", min_length=1
+    )
+    thread_id: str | None = Field(default=None, description="不传则新建；恢复时必须用同一个")
+    max_handoff: int = Field(default=6, ge=1, le=20)
+    recursion_limit: int = Field(default=30, ge=8, le=80)
+    model_config_id: int | None = None
+
+
+class Day12FullStartResult(BaseModel):
+    """第一次调用：图跑到退款审批处冻结（或没有写操作直接跑完）。"""
+
+    thread_id: str
+    paused: bool = Field(description="True 表示命中 interrupt，图已冻结并存档")
+    next: list[str] = Field(description="接下来要跑的节点：暂停时是 ('coder',)")
+    interrupt: dict[str, Any] | None = Field(default=None, description="interrupt 发出的待审批载荷")
+    answer: str = Field(default="", description="未暂停时的最终回答")
+    findings: list[str]
+    handoffs: list[dict[str, Any]]
+    events: list[dict[str, Any]]
+    steps: int
+    budget_hit: bool
+    snapshot: dict[str, Any]
+    graph: Day10GraphStructure
+    note: str
+    model: str
+    elapsed_ms: int
+
+
+class Day12FullResumeRequest(BaseModel):
+    """人工审批结果：true / false / {'approved': True, 'amount': 199}。"""
+
+    thread_id: str = Field(min_length=1)
+    decision: bool | dict[str, Any] = Field(
+        default=True,
+        description="true 放行 / false 驳回 / 对象表示改参数后放行（amount 覆盖退款金额）",
+    )
+    max_handoff: int = Field(default=6, ge=1, le=20, description="要与 start 时一致")
+    recursion_limit: int = Field(default=30, ge=8, le=80)
+    model_config_id: int | None = None
+
+
+class Day12FullResumeResult(BaseModel):
+    """恢复审批后的结果：最终答复 + 真实退款流水 + 审批是否放行。"""
+
+    thread_id: str
+    approved: bool
+    final_answer: str
+    refunds: list[dict[str, Any]] = Field(description="进程内退款流水：thread_id / 订单 / 金额")
+    findings: list[str]
+    handoffs: list[dict[str, Any]]
+    events: list[dict[str, Any]]
+    steps: int
+    budget_hit: bool
+    next: list[str] = Field(description="恢复后应当为空（图跑完了）")
+    note: str
+    model: str
+    elapsed_ms: int
+
+
+class Day12ParallelRequest(BaseModel):
+    """课程 04 / 练习 3：两条调研分支并行，再汇聚给 writer。"""
+
+    question: str = Field(
+        default="订单 A1001 签收几天了？按政策能不能退？给客户写一段说明。", min_length=1
+    )
+    model_config_id: int | None = None
+
+
+class Day12ParallelResult(BaseModel):
+    """并行结果：两条分支各自的耗时与结论 + writer 调用次数。"""
+
+    question: str
+    final_answer: str
+    branches: list[dict[str, Any]] = Field(description="每条分支：node / detail / elapsed_ms")
+    findings: list[str] = Field(description="join 处由 operator.add 合并后的结论")
+    writer_calls: int = Field(description="writer 被调用次数（要求恰好 1 次）")
+    events: list[dict[str, Any]]
+    messages: list[dict[str, Any]]
+    llm_calls: int
+    note: str
+    graph: Day10GraphStructure
+    model: str
+    elapsed_ms: int
+
+
+class Day12MappingResult(BaseModel):
+    """Day 12 静态概念数据（三堵墙 / 三角色 / 交接方式 / 状态三层 / 三层终止 / 五个坑 / 选型 / 成本）。"""
+
+    walls: list[dict[str, str]]
+    roles: list[dict[str, str]]
+    handoff_modes: list[dict[str, str]]
+    state_layers: list[dict[str, str]]
+    terminations: list[dict[str, str]]
+    pitfalls: list[dict[str, str]]
+    decision_table: list[dict[str, str]]
+    cost_table: list[dict[str, str]]
+    checklist: list[str]
+    presets: dict[str, list[str]]
+    install_hint: str
+    langgraph_version: str

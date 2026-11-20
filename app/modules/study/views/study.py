@@ -54,6 +54,17 @@ from app.modules.study.schemas.study import (
     Day11SqliteResult,
     Day11TimeTravelRequest,
     Day11TimeTravelResult,
+    Day12FullRequest,
+    Day12FullResumeRequest,
+    Day12FullResumeResult,
+    Day12FullStartResult,
+    Day12MappingResult,
+    Day12ParallelRequest,
+    Day12ParallelResult,
+    Day12SingleRequest,
+    Day12SingleResult,
+    Day12SupervisorRequest,
+    Day12SupervisorResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -80,6 +91,7 @@ from app.modules.study.services import (
     day09_langchain,
     day10_langgraph,
     day11_checkpointer,
+    day12_supervisor,
     long_memory,
     rag,
     react_loop,
@@ -788,6 +800,112 @@ async def run_day11_sqlite(
     """每次请求重开 SQLite 连接并重新编译图，历史从 var/day11_checkpoints.db 读。"""
     try:
         result = await day11_checkpointer.run_sqlite(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+# ---------- Day 12 多智能体 Supervisor ----------
+
+
+@router.get(
+    "/day12/mapping",
+    response_model=APIResponse[Day12MappingResult],
+    summary="Day 12 概念数据：三堵墙 / 三角色 / 交接方式 / 状态三层 / 三层终止 / 五个坑 / 选型与成本",
+)
+async def get_day12_mapping() -> APIResponse[Day12MappingResult]:
+    """返回静态概念数据：单 Agent 三堵墙、Supervisor 三角色分工、三种交接方式、双层状态、三层终止、五个坑。"""
+    return APIResponse(data=await day12_supervisor.mapping())
+
+
+@router.post(
+    "/day12/single",
+    response_model=APIResponse[Day12SingleResult],
+    summary="Day 12 课程 01：单 Agent 复现（假收敛 / 越权 / 工具返回值被丢弃）",
+)
+async def run_day12_single(
+    payload: Day12SingleRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day12SingleResult]:
+    """一个"什么都会"的 Agent：wide 给 5 个工具，narrow 只给 3 个只读工具，对比 issues 的差异。"""
+    try:
+        result = await day12_supervisor.run_single(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day12/team",
+    response_model=APIResponse[Day12SupervisorResult],
+    summary="Day 12 课程 02：最小 Supervisor（主管只派活 + 专家只干专活 + FINISH）",
+)
+async def run_day12_team(
+    payload: Day12SupervisorRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day12SupervisorResult]:
+    """主管用 Route 结构化输出派单（没有 content 字段），专家私有执行后只回传结论 + name。
+
+    ``dedupe_guard`` 是练习 1：连续两次派给同一人且任务高度相似时跳过本次派单转 writer。
+    """
+    try:
+        result = await day12_supervisor.run_team(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day12/full/start",
+    response_model=APIResponse[Day12FullStartResult],
+    summary="Day 12 课程 03：完整版跑到退款审批处冻结（审批 + 预算 + 存档）",
+)
+async def start_day12_full(
+    payload: Day12FullRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day12FullStartResult]:
+    """三个专家（researcher / coder / writer）+ 交接预算 + MemorySaver，写操作前 interrupt() 等人。"""
+    try:
+        result = await day12_supervisor.start_full(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day12/full/resume",
+    response_model=APIResponse[Day12FullResumeResult],
+    summary="Day 12 恢复审批：Command(resume=...) 续跑到 writer 成稿",
+)
+async def resume_day12_full(
+    payload: Day12FullResumeRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day12FullResumeResult]:
+    """decision=true 放行 / false 驳回 / 对象改参数后放行；退款流水只在 resume 之后 append 一次。"""
+    try:
+        result = await day12_supervisor.resume_full(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day12/parallel",
+    response_model=APIResponse[Day12ParallelResult],
+    summary="Day 12 课程 04 / 练习 3：Send 扇出两条调研分支 → join → writer 只调一次",
+)
+async def run_day12_parallel(
+    payload: Day12ParallelRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day12ParallelResult]:
+    """政策与订单两条分支并行调研，findings 由 operator.add 在 join 处合并。"""
+    try:
+        result = await day12_supervisor.run_parallel(db, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
