@@ -1,10 +1,11 @@
 """智能体开发学习接口：工具清单、工具调用日志、Agent 循环、ReAct、结构化输出、多轮会话。
 
-除 Day 07 的长期记忆与知识库外，其余接口都不落库——学习页是"试验台"，
-会话状态只活在进程内存里，重启即清。
+除 Day 07 的长期记忆与知识库（以及 Day 13 的 SSE 流）外，其余接口都不落库——
+学习页是"试验台"，会话状态只活在进程内存里，重启即清。
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schemas import APIResponse
@@ -65,6 +66,15 @@ from app.modules.study.schemas.study import (
     Day12SingleResult,
     Day12SupervisorRequest,
     Day12SupervisorResult,
+    Day13CustomRequest,
+    Day13CustomResult,
+    Day13InterruptRequest,
+    Day13InterruptResult,
+    Day13MappingResult,
+    Day13ModesRequest,
+    Day13ModesResult,
+    Day13TokenRequest,
+    Day13TokenResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -92,6 +102,7 @@ from app.modules.study.services import (
     day10_langgraph,
     day11_checkpointer,
     day12_supervisor,
+    day13_stream,
     long_memory,
     rag,
     react_loop,
@@ -911,3 +922,116 @@ async def run_day12_parallel(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
     return APIResponse(data=result)
+
+
+# ---------- Day 13 流式输出 ----------
+
+
+@router.get(
+    "/day13/mapping",
+    response_model=APIResponse[Day13MappingResult],
+    summary="Day 13 概念数据：四模式 / API 选型 / interrupt 规则 / SSE 三件套 / 事件协议 / 五个坑",
+)
+async def get_day13_mapping() -> APIResponse[Day13MappingResult]:
+    """返回静态概念数据：stream_mode 五种取值、三个 API 怎么选、暂停信号的三种探测方式、SSE 三件套。"""
+    return APIResponse(data=await day13_stream.mapping())
+
+
+@router.post(
+    "/day13/modes",
+    response_model=APIResponse[Day13ModesResult],
+    summary="Day 13 课程 01：values / updates / messages 四模式对照（同一张图分别订阅）",
+)
+async def run_day13_modes(
+    payload: Day13ModesRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day13ModesResult]:
+    """同一张最小图跑三趟：values、updates、messages+updates（多模式共用一趟，省一半调用）。"""
+    try:
+        result = await day13_stream.run_modes(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day13/token-stream",
+    response_model=APIResponse[Day13TokenResult],
+    summary="Day 13 课程 02：多 Agent token 按 langgraph_node 分流 + 过滤主管 JSON",
+)
+async def run_day13_token_stream(
+    payload: Day13TokenRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day13TokenResult]:
+    """三个 LLM 一起吐 token：每个专家一个气泡，主管的 json 碎片全部过滤掉（附样例）。"""
+    try:
+        result = await day13_stream.run_token_stream(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day13/custom-stream",
+    response_model=APIResponse[Day13CustomResult],
+    summary="Day 13 课程 03：custom 模式——get_stream_writer 工具内进度上报",
+)
+async def run_day13_custom_stream(
+    payload: Day13CustomRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day13CustomResult]:
+    """订阅 custom + messages + updates：检索进度与 token 排在同一条时间轴上。"""
+    try:
+        result = await day13_stream.run_custom_stream(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day13/interrupt-stream",
+    response_model=APIResponse[Day13InterruptResult],
+    summary="Day 13 课程 04：interrupt + 流式同开（只订 messages 会漏掉 __interrupt__）",
+)
+async def run_day13_interrupt_stream(
+    payload: Day13InterruptRequest,
+) -> APIResponse[Day13InterruptResult]:
+    """三次订阅对照：只订 messages（漏暂停）/ 双订阅（收到 __interrupt__）/ Command(resume=) 续跑。
+
+    该实验不调用模型，结果完全确定：图停在哪、退款记几次都可以断言。
+    """
+    try:
+        result = await day13_stream.run_interrupt_stream(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.get(
+    "/day13/sse/chat",
+    response_class=StreamingResponse,
+    summary="Day 13 课程 05：LangGraph 事件 → SSE → 浏览器（token / node_start / done）",
+)
+async def sse_day13_chat(
+    q: str = "用三句话介绍一下 SSE 流式输出",
+    model_config_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """真流式接口：浏览器用 ``EventSource`` 消费。
+
+    模型配置在返回响应之前解析（没有可用模型时仍能返回正常的 400）；
+    之后的错误只能通过 SSE 的 ``error`` 事件告知前端。
+    """
+    try:
+        cfg = await day13_stream.sse_model(db, model_config_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return StreamingResponse(
+        day13_stream.sse_chat(cfg, q),
+        media_type="text/event-stream",
+        headers=day13_stream.sse_headers(),
+    )

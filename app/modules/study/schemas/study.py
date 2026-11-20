@@ -1247,3 +1247,118 @@ class Day12MappingResult(BaseModel):
     presets: dict[str, list[str]]
     install_hint: str
     langgraph_version: str
+
+
+# ---------- Day 13 流式输出 ----------
+
+
+class Day13ModesRequest(BaseModel):
+    """课程 01：同一张图分别按 values / updates / messages 订阅。"""
+
+    question: str = Field(default="用一句话解释什么是 RAG", min_length=1)
+    model_config_id: int | None = None
+
+
+class Day13ModesResult(BaseModel):
+    """四模式对照现场：各模式的事件列表 + 统计 + 多模式二元组序列。"""
+
+    question: str
+    values: list[dict[str, Any]] = Field(description="values 事件：index / 消息数 / next / 最后一条摘要")
+    updates: list[dict[str, Any]] = Field(description="updates 事件：节点 / 增量键 / 一句话摘要")
+    messages: list[dict[str, Any]] = Field(description="messages 事件：节点 / token / 超步 / 相对时间")
+    multi: list[dict[str, Any]] = Field(description="多模式订阅的 (mode, payload) 序列，一眼看出分层")
+    mode_stats: list[dict[str, Any]] = Field(description="每种模式的事件数与耗时")
+    bubbles: list[dict[str, Any]] = Field(description="token 按节点聚合后的气泡（过滤主管 JSON 之后）")
+    node_timing: list[dict[str, Any]] = Field(description="每个节点的 token 数与首 token 偏移")
+    filtered_tokens: int = Field(description="被过滤掉的主管 JSON token 条数")
+    takeaways: list[str]
+    graph: Day10GraphStructure
+    note: str
+    model: str
+    elapsed_ms: int
+
+
+class Day13TokenRequest(BaseModel):
+    """课程 02：多 Agent 的 token 按节点分流。"""
+
+    question: str = Field(default="对比一下向量检索和 BM25 的优劣", min_length=1)
+    model_config_id: int | None = None
+
+
+class Day13TokenResult(BaseModel):
+    """token 分流结果：每个专家一个气泡 + 被过滤的主管 JSON 明细。"""
+
+    question: str
+    bubbles: list[dict[str, Any]] = Field(description="气泡：node / text / tokens / 首末偏移")
+    node_timing: list[dict[str, Any]] = Field(description="每节点 token 数 / 字符数 / 首 token 偏移")
+    first_token_ms: int = Field(description="首个可见 token 的偏移（感知延迟的核心指标）")
+    filtered: dict[str, Any] = Field(description="被过滤的主管 token：节点 / 条数 / 字符 / 样例")
+    dispatches: list[dict[str, Any]] = Field(description="主管派单序列（来自 updates 流）")
+    filter_rule: str
+    note: str
+    graph: Day10GraphStructure
+    model: str
+    elapsed_ms: int
+
+
+class Day13CustomRequest(BaseModel):
+    """课程 03：custom 模式——工具内部上报进度。"""
+
+    question: str = Field(default="LangGraph 的断点续跑是怎么实现的？", min_length=1)
+    model_config_id: int | None = None
+
+
+class Day13CustomResult(BaseModel):
+    """工具进度与 token 交错的时间线。"""
+
+    question: str
+    progress: list[dict[str, Any]] = Field(description="custom 事件：writer() 写进去的 dict + 偏移")
+    stages: list[str] = Field(description="进度文案序列（前端可当进度条节点）")
+    tokens: list[dict[str, Any]] = Field(description="messages 事件：节点 / token / 偏移")
+    bubbles: list[dict[str, Any]]
+    tool_results: list[dict[str, Any]] = Field(description="ToolMessage：工具返回的观察结果")
+    final_answer: str
+    first_token_ms: int
+    protocol_note: str
+    note: str
+    graph: Day10GraphStructure
+    model: str
+    elapsed_ms: int
+
+
+class Day13InterruptRequest(BaseModel):
+    """课程 04：interrupt + 流式同开（三次订阅 + 一次续跑，不调模型）。"""
+
+    amount: float = Field(default=199, gt=0, le=100000, description="退款金额（确定性演示，不经模型）")
+    decision: bool | dict[str, Any] = Field(
+        default=True,
+        description="续跑时给 interrupt 的回答：true / false / {'approved': True, 'amount': 150}",
+    )
+    with_resume: bool = Field(default=True, description="是否演示 Command(resume=) 续跑")
+
+
+class Day13InterruptResult(BaseModel):
+    """三种订阅方式的对照现场：错误的只订 messages / 正确的双订阅 / 续跑。"""
+
+    messages_only: dict[str, Any] = Field(description="只订 messages：事件 0 条但图已暂停（坑）")
+    with_updates: dict[str, Any] = Field(description="双订阅：收到 __interrupt__ 与审批载荷")
+    resume: dict[str, Any] | None = Field(default=None, description="Command(resume=) 续跑的事件流")
+    refunds: list[dict[str, Any]] = Field(description="本次 thread 的退款流水（重放安全证据）")
+    rules: list[str]
+    note: str
+    elapsed_ms: int
+
+
+class Day13MappingResult(BaseModel):
+    """Day 13 静态概念数据（四模式 / API 选型 / interrupt 规则 / SSE 三件套 / 事件协议 / 五个坑）。"""
+
+    stream_modes: list[dict[str, str]]
+    api_choices: list[dict[str, str]]
+    interrupt_rules: list[dict[str, str]]
+    sse_rules: list[dict[str, str]]
+    event_protocol: list[dict[str, str]]
+    pitfalls: list[dict[str, str]]
+    checklist: list[str]
+    presets: dict[str, list[str]]
+    install_hint: str
+    langgraph_version: str
