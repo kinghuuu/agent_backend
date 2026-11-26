@@ -1662,3 +1662,168 @@ class Day15TracesResult(BaseModel):
     metrics: dict[str, Any]
     feedback: dict[str, Any]
     files: dict[str, str]
+
+
+# ---------- Day 16 评估体系 ----------
+
+
+class Day16MappingResult(BaseModel):
+    """Day 16 静态概念数据（三个困难 / 三层评估 / 指标体系 / 数据来源 / rubric / 五个坑 / 速查表）。"""
+
+    difficulties: list[dict[str, str]]
+    levels: list[dict[str, str]]
+    metric_groups: list[dict[str, str]]
+    dataset_sources: list[dict[str, str]]
+    case_fields: list[dict[str, str]]
+    rubric_rules: list[dict[str, str]]
+    pitfalls: list[dict[str, str]]
+    cheatsheet: list[dict[str, str]]
+    checklist: list[str]
+    presets: dict[str, list[str]]
+    behavior_categories: list[str] = Field(description="有行为断言的类别（越界 / 能力边界 / 歧义 / 安全）")
+    gates: dict[str, Any] = Field(description="默认门禁阈值与 judge 校准口径")
+    prompts: dict[str, str] = Field(description="被对比的两版系统提示词")
+    files: dict[str, str]
+    dataset: dict[str, Any] = Field(description="当前数据集画像（类别 / 难度 / 来源分布）")
+    install_hint: str
+
+
+class Day16BuildRequest(BaseModel):
+    """构建评估集：三个来源可分别开关。"""
+
+    include_feedback: bool = Field(default=True, description="把 Day 15 点踩 trace 收进回归集（真实失败）")
+    include_seed: bool = Field(default=True, description="内置人工边界 case（越界 / 能力边界 / 歧义 / 安全）")
+    include_synthesized: bool = Field(default=True, description="内置合成变体（等价于 LLM 仿写扩量，需人工抽查）")
+    replace: bool = Field(default=True, description="True=覆盖重写；False=与已有数据集按 input 合并去重")
+
+
+class Day16DatasetResult(BaseModel):
+    """数据集现场：总数 + 三个维度的分布 + 全部 case。"""
+
+    total: int
+    distribution: dict[str, int] = Field(description="按 category 的分布")
+    difficulties: dict[str, int]
+    sources: dict[str, int] = Field(description="seed / synthesized / online 三类来源")
+    online_found: int = Field(default=0, description="本次从 Day 15 反馈里捞到的点踩条数")
+    cases: list[dict[str, Any]]
+    files: dict[str, str]
+    notes: list[str]
+
+
+class Day16RunRequest(BaseModel):
+    """跑评估：每 case 采样 N 次取多数，可按类别过滤与截断。"""
+
+    limit: int = Field(default=5, ge=1, le=50, description="本次最多跑几条 case（控成本）")
+    runs: int = Field(default=3, ge=1, le=5, description="每条 case 跑几次（多数投票，课程建议 3）")
+    category: str | None = Field(default=None, description="只跑某一类（如「越界」）")
+    model_config_id: int | None = None
+
+
+class Day16RunResult(BaseModel):
+    """评估报告：总体正确率 + 按类别切分 + 逐 case 明细 + 失败清单。"""
+
+    total: int
+    accuracy: float = Field(description="多数投票后通过的 case 占比")
+    avg_pass_rate: float = Field(description="逐 case 通过率的均值（比 accuracy 更平滑）")
+    avg_tokens: int
+    avg_steps: float
+    by_category: dict[str, dict[str, Any]]
+    runs_per_case: int
+    model: str
+    cases: list[dict[str, Any]]
+    failures: list[dict[str, Any]]
+    files: dict[str, str]
+    notes: list[str]
+    elapsed_ms: int
+
+
+class Day16JudgeRequest(BaseModel):
+    """LLM-as-judge：单点 rubric 打分 + 可选 pairwise 换序对比。"""
+
+    question: str = Field(default="报销昨天的晚餐 78 元", min_length=1)
+    answer: str = Field(
+        default="已为您提交报销：餐饮 78 元，单号 EXP-2046。",
+        min_length=1,
+        description="被评的回答（单点 rubric 用）",
+    )
+    old_answer: str = Field(default="已提交。", description="pairwise 的旧版回答；留空则跳过对比")
+    new_answer: str = Field(
+        default="已提交餐饮报销 78 元（单号 EXP-2046）。注意：餐饮报销需附发票，每日上限 100 元。",
+        description="pairwise 的新版回答",
+    )
+    model_config_id: int | None = None
+    judge_model_config_id: int | None = Field(
+        default=None, description="judge 单独指定更强的模型；不填即与被评模型同源（会有自评偏差）"
+    )
+
+
+class Day16JudgeResult(BaseModel):
+    """judge 现场：单点结论 + 降级轨迹 + pairwise 换序结论 + 自评偏差提示。"""
+
+    verdict: dict[str, Any] = Field(description="score / passed / reason")
+    method: str = Field(description="default / function_calling / json_mode / heuristic")
+    attempts: list[str]
+    pairwise: dict[str, Any] | None
+    pair_attempts: list[str]
+    self_judging: bool
+    model: str
+    notes: list[str]
+    elapsed_ms: int
+
+
+class Day16RegressionRequest(BaseModel):
+    """回归对比：baseline vs candidate 双跑同一数据集，带门禁。"""
+
+    limit: int = Field(default=4, ge=1, le=20, description="双跑很贵，默认只取前 4 条")
+    runs: int = Field(default=2, ge=1, le=5, description="每 case 采样次数（双跑 × runs 次调用）")
+    category: str | None = None
+    accuracy_drop_max: float = Field(default=0.02, ge=0, le=1, description="正确率最大降幅（0.02 = 2 个百分点）")
+    cost_increase_max: float = Field(default=0.15, ge=0, le=2, description="平均 token 最大涨幅")
+    candidate_prompt: str | None = Field(default=None, description="留空用内置 candidate 提示词")
+    model_config_id: int | None = None
+
+
+class Day16RegressionResult(BaseModel):
+    """回归现场：两版摘要 + 逐 case diff + 门禁判定。"""
+
+    baseline: dict[str, Any]
+    candidate: dict[str, Any]
+    diff: dict[str, Any]
+    gate: dict[str, Any]
+    model: str
+    runs_per_case: int
+    files: dict[str, str]
+    notes: list[str]
+    elapsed_ms: int
+
+
+class Day16CiRequest(BaseModel):
+    """CI 冒烟门禁：跑冒烟子集，与归档基线比较。"""
+
+    smoke_size: int = Field(default=10, ge=1, le=50, description="冒烟子集大小（课程建议 20）")
+    runs: int = Field(default=1, ge=1, le=3, description="冒烟为了快，默认每条只跑一次")
+    tolerance: float = Field(default=0.02, ge=0, le=1, description="允许低于基线的幅度")
+    refresh_baseline: bool = Field(default=False, description="跑完把本次成绩归档为新基线（夜跑用）")
+    candidate_prompt: str | None = None
+    model_config_id: int | None = None
+
+
+class Day16CiResult(BaseModel):
+    """冒烟门禁现场：passed / exit_code / 基线对比 / 失败清单。"""
+
+    passed: bool
+    exit_code: int = Field(description="0=允许合并；1=CI 标红")
+    accuracy: float
+    baseline_accuracy: float
+    tolerance: float
+    smoke_cases: int
+    total_cases: int
+    archived: bool = Field(description="本次是否把成绩归档为新基线（首次运行或勾选刷新）")
+    baseline: dict[str, Any] | None
+    results: list[dict[str, Any]]
+    failures: list[dict[str, Any]]
+    by_category: dict[str, dict[str, Any]]
+    model: str
+    files: dict[str, str]
+    notes: list[str]
+    elapsed_ms: int

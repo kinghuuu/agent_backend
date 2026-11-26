@@ -102,6 +102,17 @@ from app.modules.study.schemas.study import (
     Day15PlatformRequest,
     Day15PlatformResult,
     Day15TracesResult,
+    Day16BuildRequest,
+    Day16CiRequest,
+    Day16CiResult,
+    Day16DatasetResult,
+    Day16JudgeRequest,
+    Day16JudgeResult,
+    Day16MappingResult,
+    Day16RegressionRequest,
+    Day16RegressionResult,
+    Day16RunRequest,
+    Day16RunResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -132,6 +143,7 @@ from app.modules.study.services import (
     day13_stream,
     day14_mcp,
     day15_observability,
+    day16_eval,
     long_memory,
     rag,
     react_loop,
@@ -1281,3 +1293,112 @@ async def list_day15_traces(limit: int = 5) -> APIResponse[Day15TracesResult]:
 async def submit_day15_feedback(payload: Day15FeedbackRequest) -> APIResponse[Day15FeedbackResult]:
     """写 feedback.jsonl 并返回点赞率——这是 Day 16 评估集的第一批真值标签。"""
     return APIResponse(data=day15_observability.record_feedback(payload))
+
+
+# ---------- Day 16 评估体系 ----------
+
+
+@router.get(
+    "/day16/mapping",
+    response_model=APIResponse[Day16MappingResult],
+    summary="Day 16 概念数据：三个困难 / 三层评估 / 指标体系 / 数据来源 / rubric / 五个坑 / 门禁阈值",
+)
+async def get_day16_mapping() -> APIResponse[Day16MappingResult]:
+    """返回静态概念数据 + 两版提示词 + 当前数据集画像（不调模型）。"""
+    return APIResponse(data=day16_eval.mapping())
+
+
+@router.post(
+    "/day16/dataset/build",
+    response_model=APIResponse[Day16DatasetResult],
+    summary="Day 16 课程 01：从 Day 15 点踩 trace + 人工边界 + 合成变体长成评估集",
+)
+async def build_day16_dataset(payload: Day16BuildRequest) -> APIResponse[Day16DatasetResult]:
+    """按来源优先级合并去重后落盘 dataset.jsonl；每类 case 带稳定的 id。"""
+    try:
+        result = await day16_eval.build_dataset(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.get(
+    "/day16/dataset",
+    response_model=APIResponse[Day16DatasetResult],
+    summary="Day 16：读回当前数据集与类别 / 难度 / 来源分布",
+)
+async def get_day16_dataset() -> APIResponse[Day16DatasetResult]:
+    """文件不存在时返回 total=0 与「先构建」的提示，页面不报错。"""
+    return APIResponse(data=day16_eval.list_dataset())
+
+
+@router.post(
+    "/day16/run",
+    response_model=APIResponse[Day16RunResult],
+    summary="Day 16 课程 02：跑评估——每 case 多次采样取多数，结果 + 过程指标一起采",
+)
+async def run_day16_eval(
+    payload: Day16RunRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day16RunResult]:
+    """逐 case 跑 Agent 并按 规则 / 工具序列 / 行为断言 / 收敛 综合判定，报告落盘。"""
+    try:
+        result = await day16_eval.run_eval(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001  上游模型服务失败
+        raise HTTPException(status_code=502, detail=f"评估运行失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day16/judge",
+    response_model=APIResponse[Day16JudgeResult],
+    summary="Day 16 课程 03：LLM-as-judge——结构化 rubric 打分 + pairwise 换序去偏",
+)
+async def run_day16_judge(
+    payload: Day16JudgeRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day16JudgeResult]:
+    """judge 按 default→function_calling→json_mode 降级，全失败才走可观察特征兜底。"""
+    try:
+        result = await day16_eval.run_judge(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"judge 调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day16/regression",
+    response_model=APIResponse[Day16RegressionResult],
+    summary="Day 16 课程 04：baseline vs candidate 双跑 + 逐 case diff + 门禁判定",
+)
+async def run_day16_regression(
+    payload: Day16RegressionRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day16RegressionResult]:
+    """同一数据集、同一模型，只换 prompt；门禁看正确率降幅与 token 涨幅。"""
+    try:
+        result = await day16_eval.run_regression(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"回归运行失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day16/ci-gate",
+    response_model=APIResponse[Day16CiResult],
+    summary="Day 16 课程 05：CI 冒烟门禁——分层抽样冒烟集 + 与归档基线比较 + exit_code 语义",
+)
+async def run_day16_ci_gate(
+    payload: Day16CiRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day16CiResult]:
+    """真实 CI 里这一步 sys.exit(exit_code)；HTTP 版把退出码放进返回值。"""
+    try:
+        result = await day16_eval.run_ci_gate(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"冒烟门禁运行失败：{exc}") from exc
+    return APIResponse(data=result)
