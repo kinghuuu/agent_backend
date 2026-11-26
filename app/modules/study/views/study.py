@@ -113,6 +113,21 @@ from app.modules.study.schemas.study import (
     Day16RegressionResult,
     Day16RunRequest,
     Day16RunResult,
+    Day17AbRequest,
+    Day17AbResult,
+    Day17BudgetRequest,
+    Day17BudgetResult,
+    Day17CacheRequest,
+    Day17CacheResult,
+    Day17CompressRequest,
+    Day17CompressResult,
+    Day17LedgerRequest,
+    Day17LedgerResult,
+    Day17MappingResult,
+    Day17ParallelRequest,
+    Day17ParallelResult,
+    Day17RouterRequest,
+    Day17RouterResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -144,6 +159,7 @@ from app.modules.study.services import (
     day14_mcp,
     day15_observability,
     day16_eval,
+    day17_cost,
     long_memory,
     rag,
     react_loop,
@@ -1401,4 +1417,127 @@ async def run_day16_ci_gate(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"冒烟门禁运行失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+# ---------- Day 17 成本与延迟优化 ----------
+
+
+@router.get(
+    "/day17/mapping",
+    response_model=APIResponse[Day17MappingResult],
+    summary="Day 17 概念数据：成本结构 / 延迟四段 / 四杠杆 / 缓存三层 / 六个坑 / 价格与阈值",
+)
+async def get_day17_mapping() -> APIResponse[Day17MappingResult]:
+    """返回静态概念数据 + 价格表 + 预算三闸默认值（不调模型）。"""
+    return APIResponse(data=day17_cost.mapping())
+
+
+@router.post(
+    "/day17/ledger",
+    response_model=APIResponse[Day17LedgerResult],
+    summary="Day 17 课程 01：成本账本——逐步 in/out token、放大率、重复发送占比",
+)
+async def run_day17_ledger(
+    payload: Day17LedgerRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day17LedgerResult]:
+    """默认纯估算（不花钱）；勾选 live 时真调一次模型，返回估算 vs 实测的偏差。"""
+    try:
+        result = await day17_cost.run_ledger(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"账本运行失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day17/router",
+    response_model=APIResponse[Day17RouterResult],
+    summary="Day 17 课程 02：模型分级路由——规则 / 小模型分类 / 三信号升级链",
+)
+async def run_day17_router(
+    payload: Day17RouterRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day17RouterResult]:
+    """规则路由零成本；勾选 use_llm 才真调模型做分类器（会花钱，但也是课堂要看的效果）。"""
+    try:
+        result = await day17_cost.router_demo(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"路由实验失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day17/compress",
+    response_model=APIResponse[Day17CompressResult],
+    summary="Day 17 课程 03：上下文压缩——静态瘦身 + 工具结果剪裁 + 预算触发摘要",
+)
+async def run_day17_compress(
+    payload: Day17CompressRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day17CompressResult]:
+    """默认走抽取式摘要（不花钱）；勾选 use_model 才用小模型做摘要。"""
+    try:
+        result = await day17_cost.compress_demo(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"压缩实验失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day17/cache",
+    response_model=APIResponse[Day17CacheResult],
+    summary="Day 17 课程 04：缓存三层——只读白名单 / 实体校验 / 用户隔离 / 前缀哈希",
+)
+async def run_day17_cache(payload: Day17CacheRequest) -> APIResponse[Day17CacheResult]:
+    """纯逻辑实验（不调模型、不发网络请求）：三个安全阀的拦截现场都能看到原因。"""
+    return APIResponse(data=day17_cost.cache_demo(payload))
+
+
+@router.post(
+    "/day17/parallel",
+    response_model=APIResponse[Day17ParallelResult],
+    summary="Day 17 课程 05：并行工具——串行 vs 并行耗时、三道保险与时间轴",
+)
+async def run_day17_parallel(payload: Day17ParallelRequest) -> APIResponse[Day17ParallelResult]:
+    """真实 asyncio IO 模拟（1 秒级），返回实测加速比与逐工具时间轴。"""
+    try:
+        result = await day17_cost.parallel_demo(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day17/budget-agent",
+    response_model=APIResponse[Day17BudgetResult],
+    summary="Day 17 课程 06：带三闸预算熔断的 Agent（熔断 → 摘工具 → 降级交付）",
+)
+async def run_day17_budget_agent(
+    payload: Day17BudgetRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day17BudgetResult]:
+    """simulate 是确定性脚本化模型（必然熔断，课堂看逻辑）；live 才真调模型。"""
+    try:
+        result = await day17_cost.budget_demo(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"预算熔断实验失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day17/ab",
+    response_model=APIResponse[Day17AbResult],
+    summary="Day 17 课程 06：四个杠杆逐档现算成本与延迟（正确率交给 Day 16 门禁）",
+)
+async def run_day17_ab(payload: Day17AbRequest, db: AsyncSession = Depends(get_db)) -> APIResponse[Day17AbResult]:
+    """不调模型：按同一套参数现算，报告落盘 var/day17/ab_report.json。"""
+    try:
+        result = await day17_cost.ab_demo(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return APIResponse(data=result)

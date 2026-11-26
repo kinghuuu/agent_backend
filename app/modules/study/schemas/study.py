@@ -1827,3 +1827,192 @@ class Day16CiResult(BaseModel):
     files: dict[str, str]
     notes: list[str]
     elapsed_ms: int
+
+
+# ---------- Day 17 成本与延迟优化 ----------
+
+
+class Day17MappingResult(BaseModel):
+    """Day 17 静态概念数据（成本结构 / 延迟四段 / 四杠杆 / 缓存三层 / 坑 / 速查表 / 价格）。"""
+
+    cost_structure: list[dict[str, str]]
+    latency_breakdown: list[dict[str, str]]
+    levers: list[dict[str, str]]
+    cache_layers: list[dict[str, str]]
+    pitfalls: list[dict[str, str]]
+    cheatsheet: list[dict[str, str]]
+    checklist: list[str]
+    presets: dict[str, list[str]]
+    prices: list[dict[str, str]] = Field(description="价格表（$/1M token），unknown 行为兜底价")
+    thresholds: dict[str, Any] = Field(description="预算三闸 / 压缩触发线 / 缓存阈值与 TTL")
+    tiers: dict[str, Any] = Field(description="三级路由的档位定义（small / main / big）")
+    default_calls: list[dict[str, Any]] = Field(description="并行实验的默认工具调用")
+    readonly_tools: list[str] = Field(description="可缓存的只读工具白名单")
+    files: dict[str, str]
+    install_hint: str
+
+
+class Day17LedgerRequest(BaseModel):
+    """成本账本：默认纯估算；live=true 时额外真调一次模型做估算校准。"""
+
+    steps: int = Field(default=5, ge=1, le=8, description="工具决策步数（不含最后的汇总）")
+    tool_tokens: int = Field(default=800, ge=50, le=3000, description="每步工具结果占用的 token")
+    final_output: int = Field(default=500, ge=100, le=2000)
+    model: str | None = Field(default=None, description="留空用当前配置的模型名（只影响定价）")
+    model_config_id: int | None = None
+    live: bool = Field(default=False, description="真调一次模型，返回估算 vs 实测偏差")
+
+
+class Day17LedgerResult(BaseModel):
+    """账本现场：逐步行 + 三个变体 + 放大率 + 可选 live 校准。"""
+
+    model: str
+    variants: list[dict[str, Any]] = Field(description="基线 / 剪裁工具结果 / 再加 prompt 瘦身")
+    rows: list[dict[str, Any]]
+    totals: dict[str, Any]
+    amplification: float = Field(description="历史重放放大率：总输入 / 一次性问答输入")
+    waste_ratio: float = Field(description="重复发送 token 的占比")
+    baseline_in: int
+    live_probe: dict[str, Any] | None
+    files: dict[str, str]
+    notes: list[str]
+
+
+class Day17RouterRequest(BaseModel):
+    """模型分级路由：规则路由 + 可选小模型分类器。"""
+
+    question: str = Field(default="营业时间几点", min_length=1)
+    history_rounds: int = Field(default=0, ge=0, le=20, description="已有对话轮次（≥4 直接升 main）")
+    use_llm: bool = Field(default=False, description="是否真调模型做分类器路由（会花钱）")
+    model_config_id: int | None = None
+
+
+class Day17RouterResult(BaseModel):
+    """路由现场：规则结论 + 分类器结论 + 升级链 + 分流省钱的账。"""
+
+    question: str
+    rules: dict[str, Any]
+    llm: dict[str, Any] | None
+    escalation: list[dict[str, Any]]
+    tiers: list[dict[str, Any]]
+    mix: dict[str, Any]
+    notes: list[str]
+    elapsed_ms: int
+
+
+class Day17CompressRequest(BaseModel):
+    """上下文压缩：工具结果剪裁 + 预算触发摘要。"""
+
+    tool_output_chars: int = Field(default=3200, ge=200, le=20000)
+    history_rounds: int = Field(default=12, ge=2, le=40)
+    budget: int = Field(default=6000, ge=1000, le=30000, description="一次调用的上下文 token 预算")
+    keep_recent: int = Field(default=2, ge=1, le=5, description="压缩时保留最近几轮")
+    use_model: bool = Field(default=False, description="用模型做摘要（会花钱）；否则用抽取式摘要")
+    model_config_id: int | None = None
+
+
+class Day17CompressResult(BaseModel):
+    """压缩现场：静态瘦身 / 工具剪裁 / 预算摘要（含按条裁剪的反面教材）。"""
+
+    prompt: dict[str, Any]
+    tool_trim: dict[str, Any]
+    context: dict[str, Any]
+    notes: list[str]
+    elapsed_ms: int
+
+
+class Day17CacheRequest(BaseModel):
+    """三层缓存：L1 工具结果 / L2 语义（实体 + 用户隔离）/ L3 前缀。"""
+
+    question: str = Field(default="退款 45 元多久到账", min_length=1)
+    cached_question: str = Field(default="退款 45 元什么时候到账", min_length=1)
+    other_question: str = Field(default="退款 450 元多久到账", description="只差一个字符，实体不同")
+    answer: str = Field(default="45 元退款将在 3 个工作日内原路退回", min_length=1)
+    threshold: float = Field(default=0.95, ge=0.5, le=0.999)
+    user_id: str = Field(default="u1")
+    other_user_id: str = Field(default="u2")
+
+
+class Day17CacheResult(BaseModel):
+    """缓存现场：三层各自的命中矩阵与安全阀拦截记录。"""
+
+    l1: dict[str, Any]
+    l2: dict[str, Any]
+    l3: dict[str, Any]
+    notes: list[str]
+
+
+class Day17ParallelRequest(BaseModel):
+    """并行工具：默认四个只读工具，可注入一次失败。"""
+
+    tools: list[dict[str, Any]] = Field(default_factory=list, description='形如 [{"name":"get_order","ms":620}]')
+    limit: int = Field(default=4, ge=1, le=8, description="并发上限（Semaphore）")
+    timeout_ms: int = Field(default=3000, ge=200, le=10000)
+    fail_index: int = Field(default=-1, ge=-1, le=7, description="让第 N 个工具失败（-1 = 全部成功）")
+
+
+class Day17ParallelResult(BaseModel):
+    """并行现场：串行 vs 并行耗时、加速比、逐工具结果与时间轴。"""
+
+    serial_ms: int
+    parallel_ms: int
+    theoretical_ms: int
+    speedup: float
+    theoretical_speedup: float
+    results: list[dict[str, Any]]
+    timeline: list[dict[str, Any]]
+    notes: list[str]
+
+
+class Day17BudgetRequest(BaseModel):
+    """预算熔断 Agent：simulate 确定性、live 真模型。"""
+
+    question: str = Field(
+        default="帮我查下订单 SO20261115001 的物流，顺便确认金额、能不能用券、能不能开发票",
+        min_length=1,
+        description="带上订单号，live 模式才会真的扇出多个工具",
+    )
+    max_cost: float = Field(default=0.002, gt=0, description="一次 run 的费用上限（美元）")
+    max_steps: int = Field(default=4, ge=1, le=8)
+    max_wall: float = Field(default=15.0, gt=0, le=120)
+    mode: Literal["simulate", "live"] = Field(default="simulate")
+    model_config_id: int | None = None
+
+
+class Day17BudgetResult(BaseModel):
+    """熔断现场：逐步预算状态 + 熔断原因 + 降级交付的答案 + 账本。"""
+
+    mode: str
+    model: str
+    answer: str
+    stop_reason: str
+    degraded: bool
+    steps: list[dict[str, Any]]
+    budget: dict[str, Any]
+    ledger: dict[str, Any]
+    cache: dict[str, Any]
+    notes: list[str]
+    elapsed_ms: int
+
+
+class Day17AbRequest(BaseModel):
+    """A/B 投影：四个杠杆的开关参数（正确率列留给 Day 16）。"""
+
+    steps: int = Field(default=5, ge=1, le=8)
+    tool_tokens: int = Field(default=800, ge=50, le=3000)
+    model: str | None = None
+    cache_hit_rate: float = Field(default=0.28, ge=0, le=0.95)
+    parallel_tools: int = Field(default=4, ge=1, le=8, description="每步扇出的只读工具数")
+    tool_ms: int = Field(default=900, ge=50, le=5000, description="单个工具的平均耗时")
+
+
+class Day17AbResult(BaseModel):
+    """A/B 报告：逐档现算的成本/延迟 + 结论 + 门禁口径。"""
+
+    model: str
+    rows: list[dict[str, Any]]
+    conclusion: str
+    assumptions: dict[str, Any]
+    gate: dict[str, Any]
+    files: dict[str, str]
+    notes: list[str]
