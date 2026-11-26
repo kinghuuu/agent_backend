@@ -2,6 +2,9 @@
 
 除 Day 07 的长期记忆与知识库（以及 Day 13 的 SSE 流）外，其余接口都不落库——
 学习页是"试验台"，会话状态只活在进程内存里，重启即清。
+
+Day 15 的可观测性接口是例外中的例外：它把 trace 写进 ``agent_backend/var/day15/*.jsonl``
+（文件而不是数据库），这样重启后仍能回放历史轨迹——这正是"可观测性数据要留存"的本意。
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -87,6 +90,18 @@ from app.modules.study.schemas.study import (
     Day14MixedResult,
     Day14NoisyRequest,
     Day14NoisyResult,
+    Day15CallbackRequest,
+    Day15CallbackResult,
+    Day15FeedbackRequest,
+    Day15FeedbackResult,
+    Day15FullStackRequest,
+    Day15FullStackResult,
+    Day15MappingResult,
+    Day15OwnTraceRequest,
+    Day15OwnTraceResult,
+    Day15PlatformRequest,
+    Day15PlatformResult,
+    Day15TracesResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -116,6 +131,7 @@ from app.modules.study.services import (
     day12_supervisor,
     day13_stream,
     day14_mcp,
+    day15_observability,
     long_memory,
     rag,
     react_loop,
@@ -1159,3 +1175,109 @@ async def run_day14_noisy(payload: Day14NoisyRequest) -> APIResponse[Day14NoisyR
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return APIResponse(data=result)
+
+
+# ---------- Day 15 可观测性 ----------
+
+
+@router.get(
+    "/day15/mapping",
+    response_model=APIResponse[Day15MappingResult],
+    summary="Day 15 概念数据：失败形态 / 三大件 / 两条路线 / 八字段 / 五个坑 / 平台就绪状态",
+)
+async def get_day15_mapping() -> APIResponse[Day15MappingResult]:
+    """返回静态概念数据 + LangSmith / Langfuse 的配置状态（只读环境变量）。"""
+    return APIResponse(data=await day15_observability.mapping())
+
+
+@router.post(
+    "/day15/callback",
+    response_model=APIResponse[Day15CallbackResult],
+    summary="Day 15 课程 02：自建 CallbackHandler，从回调事件还原 trace 树",
+)
+async def run_day15_callback(
+    payload: Day15CallbackRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day15CallbackResult]:
+    """跑一次真实 Agent，用自定义 Handler 记录 LLM / 工具生命周期并还原调用树。"""
+    try:
+        result = await day15_observability.run_callback(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"回调追踪失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day15/platform",
+    response_model=APIResponse[Day15PlatformResult],
+    summary="Day 15 课程 01/03：LangSmith 零代码接入 / Langfuse Handler + 用户反馈打分",
+)
+async def run_day15_platform(
+    payload: Day15PlatformRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day15PlatformResult]:
+    """没配 key 时只返回配置说明（不跑模型、不改环境变量）；配好才真实上报。"""
+    try:
+        result = await day15_observability.run_platform(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"平台接入失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day15/own-trace",
+    response_model=APIResponse[Day15OwnTraceResult],
+    summary="Day 15 课程 04：自建 span + JSONL 落盘，回放成树并聚合指标",
+)
+async def run_day15_own_trace(
+    payload: Day15OwnTraceRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day15OwnTraceResult]:
+    """手写循环包 span（含 token 记账）→ 写 traces.jsonl → 建树 + p50/p95 + 成本。"""
+    try:
+        result = await day15_observability.run_own_trace(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"自建追踪失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day15/full-stack",
+    response_model=APIResponse[Day15FullStackResult],
+    summary="Day 15 课程 05：LangGraph + MCP 全链路（trace_id 跨进程传播）",
+)
+async def run_day15_full_stack(
+    payload: Day15FullStackRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day15FullStackResult]:
+    """客户端与 MCP Server 各写 JSONL，靠同一个 trace_id 合并成完整时间轴。"""
+    try:
+        result = await day15_observability.run_full_stack(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"全链路追踪失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.get(
+    "/day15/traces",
+    response_model=APIResponse[Day15TracesResult],
+    summary="Day 15：回放最近 N 条自建 trace + 全局指标 + 用户反馈聚合",
+)
+async def list_day15_traces(limit: int = 5) -> APIResponse[Day15TracesResult]:
+    """从 traces.jsonl 读回记录：按 trace_id 分组、还原树、聚合 p50/p95 与成本。"""
+    safe_limit = max(1, min(limit, 20))
+    return APIResponse(data=day15_observability.list_traces(safe_limit))
+
+
+@router.post(
+    "/day15/feedback",
+    response_model=APIResponse[Day15FeedbackResult],
+    summary="Day 15：把用户点赞/点踩落到 trace 上（自建版 score）",
+)
+async def submit_day15_feedback(payload: Day15FeedbackRequest) -> APIResponse[Day15FeedbackResult]:
+    """写 feedback.jsonl 并返回点赞率——这是 Day 16 评估集的第一批真值标签。"""
+    return APIResponse(data=day15_observability.record_feedback(payload))

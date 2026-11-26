@@ -31,3 +31,9 @@ langgraph-checkpoint-sqlite==3.1.3
 # 框架篇（Day 14 起：MCP 协议 —— 工具搬进独立进程/服务，跨语言跨框架复用）
 mcp==1.24.0
 langchain-mcp-adapters==0.3.1
+
+# 工程化篇（Day 15 起：可观测性）
+# LangSmith 已随 langchain 安装（langsmith），只需配 LANGSMITH_* 环境变量即可上报，无需额外依赖。
+# Langfuse 是可选的开源方案，本仓库不锁版本以免与现有栈冲突；要用时自行安装：
+#   pip install langfuse
+# 自建 trace / 指标聚合只用标准库（json / contextvars / statistics 手写），零依赖。

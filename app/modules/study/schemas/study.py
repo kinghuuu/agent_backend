@@ -1504,3 +1504,161 @@ class Day14NoisyResult(BaseModel):
     explain: str
     sdk_note: str
     elapsed_ms: int
+
+
+# ---------- Day 15 可观测性 ----------
+
+
+class Day15MappingResult(BaseModel):
+    """Day 15 静态概念数据（失败形态 / 三大件 / 两条路线 / 八字段 / 指标定义 / 五个坑 / 速查表）。"""
+
+    failure_modes: list[dict[str, str]]
+    pillars: list[dict[str, str]]
+    routes: list[dict[str, str]]
+    trace_fields: list[dict[str, str]]
+    metric_defs: list[dict[str, str]]
+    pitfalls: list[dict[str, str]]
+    cheatsheet: list[dict[str, str]]
+    checklist: list[str]
+    presets: dict[str, list[str]]
+    platform: dict[str, Any] = Field(description="LangSmith / Langfuse 的就绪状态（缺哪些环境变量、装没装）")
+    files: dict[str, str] = Field(description="自建 trace / 业务日志 / 服务端 span / 反馈的落盘路径")
+    versions: dict[str, str]
+    install_hint: str
+
+
+class Day15CallbackRequest(BaseModel):
+    """课程 02：自建 CallbackHandler 跑一次真实 Agent。"""
+
+    question: str = Field(default="帮我报销昨天的午餐 45 元", min_length=1)
+    user_id: str = Field(default="u_889", min_length=1, description="会随 metadata 上报，作为筛选维度")
+    model_config_id: int | None = None
+
+
+class Day15CallbackResult(BaseModel):
+    """回调现场：树 + 时间轴 + 原始事件 + token 统计。"""
+
+    question: str
+    answer: str
+    tree: list[dict[str, Any]] = Field(description="按 parent_run_id 还原的调用树")
+    timeline: list[dict[str, Any]] = Field(description="按 offset_ms 排序的甘特条数据")
+    events: list[dict[str, Any]] = Field(description="原始事件：LLM 输入预览 / token / 工具参数与返回")
+    llm_calls: int
+    tool_calls: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    tags: list[str]
+    metadata: dict[str, Any]
+    model: str
+    note: str
+    elapsed_ms: int
+
+
+class Day15PlatformRequest(BaseModel):
+    """课程 01/03：平台接入（没配 key 时只返回配置说明，不跑模型）。"""
+
+    provider: Literal["langsmith", "langfuse"] = Field(default="langsmith")
+    question: str = Field(default="帮我报销昨天的午餐 45 元", min_length=1)
+    user_id: str = Field(default="u_889", min_length=1)
+    model_config_id: int | None = None
+    feedback: bool = Field(default=False, description="Langfuse：跑完回填一条点赞 score（Day 16 评估集原料）")
+
+
+class Day15PlatformResult(BaseModel):
+    """平台接入现场：配置状态 + 标签 + trace id + 下一步指引。"""
+
+    provider: str
+    configured: bool = Field(description="false 时不会跑模型，只返回配置说明")
+    missing: list[str]
+    answer: str
+    trace_id: str = Field(description="Langfuse 可直接拿到；LangSmith 由平台分配，UI 里按 tags 筛选")
+    tags: list[str]
+    metadata: dict[str, Any]
+    dashboard: str
+    instructions: list[str]
+    notes: list[str]
+    model: str
+    elapsed_ms: int
+    run_info: dict[str, Any] | None = Field(default=None, description="尽力读取的最近一条 LangSmith run")
+
+
+class Day15OwnTraceRequest(BaseModel):
+    """课程 04：自建 span + JSONL（真实调模型，但结构完全可复现）。"""
+
+    question: str = Field(default="报销高铁票 237 元", min_length=1)
+    user_id: str = Field(default="u_889", min_length=1)
+    model_config_id: int | None = None
+    max_steps: int = Field(default=5, ge=2, le=10, description="手写循环的 MAX_STEPS 保险丝")
+    concurrency_runs: int = Field(default=3, ge=1, le=5, description="并发不串线实验的协程数")
+
+
+class Day15OwnTraceResult(BaseModel):
+    """自建追踪现场：本次 trace 的树与指标 + 全局指标 + 并发隔离证据。"""
+
+    trace_id: str
+    tree: list[dict[str, Any]]
+    spans: list[dict[str, Any]] = Field(description="扁平八字段记录（与 JSONL 行一致，已脱敏）")
+    metrics: dict[str, Any] = Field(description="本次 trace 聚合：p50/p95 / token / 成本 / 错误率")
+    global_metrics: dict[str, Any] = Field(description="traces.jsonl 全量聚合")
+    concurrency: dict[str, Any] = Field(description="ContextVar 并发隔离实验（纯本地，不调模型）")
+    answer: str
+    stop_reason: str
+    model: str
+    file: str
+    note: str
+    elapsed_ms: int
+
+
+class Day15FullStackRequest(BaseModel):
+    """课程 05：LangGraph + MCP 全链路（trace_id 跨进程传播）。"""
+
+    question: str = Field(default="报销昨天的晚餐 78 元", min_length=1)
+    model_config_id: int | None = None
+
+
+class Day15FullStackResult(BaseModel):
+    """全链路现场：客户端事件 + 服务端 span + 合并时间轴。"""
+
+    trace_id: str
+    answer: str
+    terminated_normally: bool
+    termination: str
+    steps: int
+    tool_calls: list[dict[str, Any]]
+    business: dict[str, Any] | None
+    server_spans: list[dict[str, Any]]
+    merged: list[dict[str, Any]]
+    matched: bool = Field(description="服务端是否收到同一个 trace_id（模型有没有把参数传过去）")
+    input_tokens: int
+    output_tokens: int
+    files: dict[str, str]
+    notes: list[str]
+    model: str
+    elapsed_ms: int
+
+
+class Day15FeedbackRequest(BaseModel):
+    """自建版 score：把用户反馈落到某条 trace 上。"""
+
+    trace_id: str = Field(min_length=1, description="要打分的 trace（自建 traces.jsonl 里的 id）")
+    value: int = Field(default=1, ge=-1, le=1, description="1=赞 / -1=踩 / 0=中性")
+    comment: str = Field(default="", max_length=500)
+
+
+class Day15FeedbackResult(BaseModel):
+    """反馈落库结果 + 点赞率聚合。"""
+
+    trace_id: str
+    value: int
+    comment: str
+    summary: dict[str, Any]
+
+
+class Day15TracesResult(BaseModel):
+    """trace 回放与指标看板：最近 N 条 trace + 全局指标 + 反馈聚合。"""
+
+    traces: list[dict[str, Any]] = Field(description="每条 trace：question / termination / tree / metrics")
+    metrics: dict[str, Any]
+    feedback: dict[str, Any]
+    files: dict[str, str]
