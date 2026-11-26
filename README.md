@@ -24,7 +24,7 @@ agent_backend/
 ## 启动
 
 ```bash
-# 1. 启动依赖（PostgreSQL 15400 / Redis 6379）
+# 1. 启动依赖（PostgreSQL 15400 / Redis 16380，容器内仍 6379）
 docker compose up -d postgres redis
 
 # 2. 本地运行（推荐虚拟环境）

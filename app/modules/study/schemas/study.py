@@ -1362,3 +1362,145 @@ class Day13MappingResult(BaseModel):
     presets: dict[str, list[str]]
     install_hint: str
     langgraph_version: str
+
+
+# ---------- Day 14 MCP 协议 ----------
+
+
+class Day14MappingResult(BaseModel):
+    """Day 14 静态概念数据（M×N / FC vs MCP / 三角色 / 两传输 / 三原语 / 迁移对照 / 五个坑）。"""
+
+    mxn: dict[str, Any]
+    fc_vs_mcp: list[dict[str, str]]
+    roles: list[dict[str, str]]
+    transports: list[dict[str, str]]
+    primitives: list[dict[str, str]]
+    migration: list[dict[str, str]]
+    pitfalls: list[dict[str, str]]
+    cheatsheet: list[dict[str, str]]
+    checklist: list[str]
+    presets: dict[str, list[str]]
+    servers: list[dict[str, str]]
+    install_hint: str
+    versions: dict[str, str]
+
+
+class Day14DiscoverResult(BaseModel):
+    """工具发现现场：每个 Server 的协议视角 + LangChain 视角，以及 spawn 了几个子进程。"""
+
+    servers: list[dict[str, Any]] = Field(description="每个 Server：tools / resources / prompts / adapted")
+    spawn_count: int = Field(description="本次请求 spawn 的子进程数（stdio 下每开一个会话就是一个进程）")
+    total_tools: int
+    handshake: list[dict[str, str]] = Field(description="握手五步：spawn → initialize → tools/list → resources → get_tools")
+    bridge_note: str
+    note: str
+    elapsed_ms: int
+
+
+class Day14CallRequest(BaseModel):
+    """直接发 tools/call：不经过模型，用来验证 Server 端校验。"""
+
+    server: Literal["docs", "crm"] = Field(default="crm", description="演示 Server：docs（只读检索）/ crm（读写）")
+    tool: str = Field(default="deduct_balance", min_length=1)
+    arguments: dict[str, Any] = Field(
+        default_factory=lambda: {"customer_id": "C001", "amount": 100},
+        description="工具参数（原样进 tools/call 的 arguments）",
+    )
+
+
+class Day14CallResult(BaseModel):
+    """一次 tools/call 的结果：isError + 文本内容 + 耗时。"""
+
+    server: str
+    tool: str
+    arguments: dict[str, Any]
+    is_error: bool = Field(description="Server 端把失败变成 isError + 文本，而不是抛异常")
+    content: list[str]
+    structured: Any = None
+    note: str
+    elapsed_ms: int
+
+
+class Day14AgentRequest(BaseModel):
+    """课程 03：单 Agent 横跨两个 MCP Server。"""
+
+    question: str = Field(
+        default="查一下客户 C001 的信息，然后看看文档库里 Checkpointer 是什么", min_length=1
+    )
+    model_config_id: int | None = None
+    max_steps: int = Field(default=8, ge=2, le=20, description="工具调用步数上限（换算成 recursion_limit）")
+
+
+class Day14AgentResult(BaseModel):
+    """端到端结果：工具清单（带来源 Server）+ 执行轨迹 + 最终回答。"""
+
+    question: str
+    tools: list[dict[str, Any]] = Field(description="get_tools() 转换后的工具：name / server / params")
+    steps: list[dict[str, Any]] = Field(description="轨迹：tool_call / tool_result / answer")
+    tool_call_count: int
+    answer: str
+    discovery_ms: int = Field(description="spawn + tools/list + 转换耗时（每个请求都要付一次）")
+    elapsed_ms: int
+    model: str
+    note: str
+
+
+class Day14MixedRequest(BaseModel):
+    """课程 05：MCP 工具 + 本地工具混装（余额不足 → 转人工）。"""
+
+    question: str = Field(default="给客户 C001 扣款 5000 元", min_length=1)
+    model_config_id: int | None = None
+
+
+class Day14MixedResult(BaseModel):
+    """混装演练现场：气泡（token 分流）+ updates + 完整轨迹 + 是否真的转了人工。"""
+
+    question: str
+    tools: list[dict[str, Any]]
+    bubbles: list[dict[str, Any]]
+    updates: list[dict[str, Any]]
+    steps: list[dict[str, Any]]
+    escalated: bool = Field(description="是否调用了本地 escalate_to_human")
+    final_answer: str
+    note: str
+    model: str
+    elapsed_ms: int
+
+
+class Day14HttpRequest(BaseModel):
+    """课程 04：streamable-http 共享服务（临时 uvicorn，随机端口）。"""
+
+    topic: str = Field(default="本周", min_length=1, description="传给 team_announcement 的参数")
+
+
+class Day14HttpResult(BaseModel):
+    """临时 HTTP Server 的现场：URL、启动耗时、工具清单、调用结果、是否已关闭。"""
+
+    url: str
+    startup_ms: int
+    stopped: bool
+    tools: list[dict[str, Any]]
+    call_arguments: dict[str, Any]
+    content: list[str]
+    is_error: bool
+    notes: list[str]
+    elapsed_ms: int
+
+
+class Day14NoisyRequest(BaseModel):
+    """坑 1 现场：stdout 污染的三种形态。"""
+
+    mode: Literal["all", "print", "fd_line", "fd"] = Field(
+        default="all", description="print=写 sys.stdout / fd_line=整行写 fd1 / fd=半行写 fd1"
+    )
+    timeout_seconds: float = Field(default=6, ge=2, le=30, description="单次的等待上限（fd 形态会挂死到超时）")
+    repeat: int = Field(default=1, ge=1, le=3, description="每种形态跑几次（用来观察整行垃圾的抖动）")
+
+
+class Day14NoisyResult(BaseModel):
+    """三种污染形态的实测结论。"""
+
+    cases: list[dict[str, Any]]
+    explain: str
+    sdk_note: str
+    elapsed_ms: int

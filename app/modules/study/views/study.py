@@ -75,6 +75,18 @@ from app.modules.study.schemas.study import (
     Day13ModesResult,
     Day13TokenRequest,
     Day13TokenResult,
+    Day14AgentRequest,
+    Day14AgentResult,
+    Day14CallRequest,
+    Day14CallResult,
+    Day14DiscoverResult,
+    Day14HttpRequest,
+    Day14HttpResult,
+    Day14MappingResult,
+    Day14MixedRequest,
+    Day14MixedResult,
+    Day14NoisyRequest,
+    Day14NoisyResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -103,6 +115,7 @@ from app.modules.study.services import (
     day11_checkpointer,
     day12_supervisor,
     day13_stream,
+    day14_mcp,
     long_memory,
     rag,
     react_loop,
@@ -1035,3 +1048,114 @@ async def sse_day13_chat(
         media_type="text/event-stream",
         headers=day13_stream.sse_headers(),
     )
+
+
+# ---------- Day 14 MCP 协议 ----------
+
+
+@router.get(
+    "/day14/mapping",
+    response_model=APIResponse[Day14MappingResult],
+    summary="Day 14 概念数据：M×N / FC vs MCP / 三角色 / 两传输 / 三原语 / 迁移对照 / 五个坑",
+)
+async def get_day14_mapping() -> APIResponse[Day14MappingResult]:
+    """返回静态概念数据：为什么需要 MCP、FC 与 MCP 分工、三角色两传输、三种原语、五个坑。"""
+    return APIResponse(data=await day14_mcp.mapping())
+
+
+@router.post(
+    "/day14/discover",
+    response_model=APIResponse[Day14DiscoverResult],
+    summary="Day 14 课程 01/02：spawn 两个 stdio Server，协议视角 + LangChain 视角一起看",
+)
+async def run_day14_discover() -> APIResponse[Day14DiscoverResult]:
+    """真实拉起两个子进程，走 initialize → tools/list → resources/list → get_tools()。"""
+    try:
+        result = await day14_mcp.discover()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"MCP 子进程通信失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day14/call",
+    response_model=APIResponse[Day14CallResult],
+    summary="Day 14：直接发 tools/call（不经模型），验证 Server 端校验与『错误即结果』",
+)
+async def call_day14_tool(payload: Day14CallRequest) -> APIResponse[Day14CallResult]:
+    """手工指定 server / tool / arguments，看 Server 怎么把校验失败变成 isError 文本。"""
+    try:
+        result = await day14_mcp.call_tool(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"MCP 子进程通信失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day14/agent",
+    response_model=APIResponse[Day14AgentResult],
+    summary="Day 14 课程 03：一个 Agent 横跨两个 MCP Server（查 CRM + 查文档）",
+)
+async def run_day14_agent(
+    payload: Day14AgentRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day14AgentResult]:
+    """get_tools() 把两个 Server 的工具转成扁平列表交给 create_agent，模型层毫无感知差异。"""
+    try:
+        result = await day14_mcp.run_agent(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型或 MCP 调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day14/mixed",
+    response_model=APIResponse[Day14MixedResult],
+    summary="Day 14 课程 05：MCP 工具 + 本地工具混装（余额不足 → 转人工），流式照常",
+)
+async def run_day14_mixed(
+    payload: Day14MixedRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[Day14MixedResult]:
+    """扣款被 CRM Server 拦住后，Agent 改调本地 escalate_to_human——两种来源同一条轨迹。"""
+    try:
+        result = await day14_mcp.run_mixed(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"模型或 MCP 调用失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day14/http",
+    response_model=APIResponse[Day14HttpResult],
+    summary="Day 14 课程 04：streamable-http 共享服务（临时 uvicorn，随机端口，用完即关）",
+)
+async def run_day14_http(payload: Day14HttpRequest) -> APIResponse[Day14HttpResult]:
+    """后台线程起一个临时 MCP HTTP Server，客户端用 transport="http" 连上再调用。"""
+    try:
+        result = await day14_mcp.run_http(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"MCP HTTP 服务失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day14/noisy",
+    response_model=APIResponse[Day14NoisyResult],
+    summary="Day 14 坑 1 现场：stdout 污染协议通道的三种形态实测",
+)
+async def run_day14_noisy(payload: Day14NoisyRequest) -> APIResponse[Day14NoisyResult]:
+    """print / 整行写 fd1 / 半行写 fd1 各跑一遍，用结果说明『stdout 是协议通道』。"""
+    try:
+        result = await day14_mcp.run_noisy(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
