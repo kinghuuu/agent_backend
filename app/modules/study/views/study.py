@@ -7,7 +7,7 @@ Day 15 的可观测性接口是例外中的例外：它把 trace 写进 ``agent_
 （文件而不是数据库），这样重启后仍能回放历史轨迹——这正是"可观测性数据要留存"的本意。
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -144,6 +144,20 @@ from app.modules.study.schemas.study import (
     Day18SandboxRequest,
     Day18SandboxResult,
     Day18SuiteResult,
+    Day19ConcurrencyRequest,
+    Day19ConcurrencyResult,
+    Day19MappingResult,
+    Day19RateLimitRequest,
+    Day19RateLimitResult,
+    Day19RolloutRequest,
+    Day19RolloutResult,
+    Day19RunsRequest,
+    Day19RunsResult,
+    Day19SessionRequest,
+    Day19SessionResult,
+    Day19SkeletonResult,
+    Day19SsePreviewRequest,
+    Day19SsePreviewResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -177,6 +191,7 @@ from app.modules.study.services import (
     day16_eval,
     day17_cost,
     day18_security,
+    day19_service,
     long_memory,
     rag,
     react_loop,
@@ -1669,3 +1684,143 @@ async def run_day18_pipeline(payload: Day18PipelineRequest) -> APIResponse[Day18
 async def run_day18_attack_suite() -> APIResponse[Day18SuiteResult]:
     """安全也要有回归集：改 prompt / 换模型 / 加工具都要重跑这 10 条。"""
     return APIResponse(data=day18_security.attack_suite())
+
+
+# ============================================================
+# Day 19 服务化部署：并发 / SSE / 会话 / run 管理 / 限流 / 灰度 / 总装
+# ============================================================
+
+
+@router.get(
+    "/day19/mapping",
+    response_model=APIResponse[Day19MappingResult],
+    summary="Day 19 概念数据：服务差异 / 四层架构 / 并发模型 / SSE / 三道闸 / 存储 / 坑 / 速查表",
+)
+async def get_day19_mapping() -> APIResponse[Day19MappingResult]:
+    """返回静态概念数据 + 依赖版本（不调模型、不起服务、不写文件）。"""
+    return APIResponse(data=day19_service.mapping())
+
+
+@router.post(
+    "/day19/concurrency",
+    response_model=APIResponse[Day19ConcurrencyResult],
+    summary="Day 19 课程 01：同步阻塞 vs 协程并发（真实计时）+ 容量数学与雪崩推演",
+)
+async def run_day19_concurrency(
+    payload: Day19ConcurrencyRequest,
+) -> APIResponse[Day19ConcurrencyResult]:
+    """worker 串行会线性翻倍，协程并发只等一次；容量 = worker 数 ÷ 单 run 时长。"""
+    result = await day19_service.concurrency_demo(payload)
+    return APIResponse(data=result)
+
+
+@router.get(
+    "/day19/sse/chat",
+    response_class=StreamingResponse,
+    summary="Day 19 课程 02：生产级 SSE（心跳 + 递增 id + meta/node/token/done/error + 断线续发）",
+)
+async def sse_day19_chat(
+    q: str = "订单 A1001 到哪了？",
+    slow_ms: int = 1200,
+    heartbeat_ms: int = 400,
+    fail: bool = False,
+    last_event_id: int | None = None,
+    last_event_id_header: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    """脚本化事件流（不调模型）：用 EventSource 直连即可观察心跳与断线续发。
+
+    ``last_event_id`` 优先取查询参数，其次取浏览器重连自动带上的 ``Last-Event-ID`` 头；
+    只补发 id 更大的事件，前端因此能「接着看」而不是从头跑。
+    """
+    resume_from = last_event_id if last_event_id is not None else -1
+    if last_event_id_header:
+        try:
+            resume_from = max(resume_from, int(last_event_id_header))
+        except ValueError:
+            pass  # 头不合法就当没带，继续全量发送
+    plan = day19_service.sse_plan(
+        q[:200],
+        slow_ms=max(0, min(slow_ms, 5000)),
+        fail=fail,
+    )
+    return StreamingResponse(
+        day19_service.sse_stream(
+            plan,
+            heartbeat_ms=max(100, min(heartbeat_ms, 30000)),
+            last_event_id=resume_from,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post(
+    "/day19/sse/preview",
+    response_model=APIResponse[Day19SsePreviewResult],
+    summary="Day 19 课程 02：SSE 事件计划预览（原始帧 + 心跳 + Last-Event-ID 续发）",
+)
+async def preview_day19_sse(
+    payload: Day19SsePreviewRequest,
+) -> APIResponse[Day19SsePreviewResult]:
+    """非流式预览：不连网也能看帧格式、心跳位置与断线后补发条数。"""
+    return APIResponse(data=day19_service.sse_preview(payload))
+
+
+@router.post(
+    "/day19/session",
+    response_model=APIResponse[Day19SessionResult],
+    summary="Day 19 课程 03：thread_id 拆包 + 归属校验矩阵 + 审批 scope + 恢复载荷",
+)
+async def run_day19_session(payload: Day19SessionRequest) -> APIResponse[Day19SessionResult]:
+    """纯逻辑权限矩阵：越权返 404、无 scope 返 403、载荷由服务端构造。"""
+    return APIResponse(data=day19_service.session_demo(payload))
+
+
+@router.post(
+    "/day19/runs",
+    response_model=APIResponse[Day19RunsResult],
+    summary="Day 19 课程 04：run 生命周期（背压 503 / 幂等重放 / 软合并 / 越权轮询 / 取消）",
+)
+async def run_day19_runs(payload: Day19RunsRequest) -> APIResponse[Day19RunsResult]:
+    """真实异步：多个 run 并发推进，超出容量立即 503，取消停在当前超步。"""
+    try:
+        result = await day19_service.run_manager_demo(payload)
+    except Exception as exc:  # noqa: BLE001  管理器自身异常不应把接口打成 500
+        raise HTTPException(status_code=502, detail=f"run 管理实验失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day19/rate-limit",
+    response_model=APIResponse[Day19RateLimitResult],
+    summary="Day 19 课程 05：令牌桶突发与回填 + 租户月配额校验/结算",
+)
+async def run_day19_rate_limit(
+    payload: Day19RateLimitRequest,
+) -> APIResponse[Day19RateLimitResult]:
+    """纯逻辑：429 与 Retry-After、402 配额语义、只校验不扣减的反面对照。"""
+    return APIResponse(data=day19_service.rate_limit_demo(payload))
+
+
+@router.post(
+    "/day19/rollout",
+    response_model=APIResponse[Day19RolloutResult],
+    summary="Day 19 课程 06：prompt 版本化 + hash 稳定灰度 + 门禁 + 30 秒回滚",
+)
+async def run_day19_rollout(payload: Day19RolloutRequest) -> APIResponse[Day19RolloutResult]:
+    """纯逻辑：同一用户永远命中同一版本，分布接近百分比，门禁不过禁止放量。"""
+    return APIResponse(data=day19_service.rollout_demo(payload))
+
+
+@router.get(
+    "/day19/skeleton",
+    response_model=APIResponse[Day19SkeletonResult],
+    summary="Day 19 课程 07：总装骨架（四层组件 / 请求生命周期 / 端点表 / 可抄代码）",
+)
+async def get_day19_skeleton() -> APIResponse[Day19SkeletonResult]:
+    """麻雀虽小四层俱全的最小服务骨架，可直接当新项目起点。"""
+    return APIResponse(data=day19_service.skeleton())
