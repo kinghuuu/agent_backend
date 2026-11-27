@@ -2594,3 +2594,185 @@ class Day20ChaosResult(BaseModel):
     expectations: list[dict[str, Any]] = Field(description="预期声明表：预期 vs 实测 vs 判定 vs 盲区")
     blind_spots: list[str] = Field(description="判定落空的地方 = 可靠性盲区")
     notes: list[str]
+
+
+# ============================================================
+# Day 21 规划能力
+# ============================================================
+
+
+class Day21Facts(BaseModel):
+    """规划实验共用的补货场景事实：这五个数决定「到底能不能接单」。"""
+
+    sku: str = Field(default="SKU-1024", min_length=1, max_length=40, description="商品编码")
+    order_qty: int = Field(default=500, ge=1, le=100000, description="急单数量（件）")
+    days: int = Field(default=5, ge=1, le=60, description="交期（天）")
+    stock: int = Field(default=120, ge=0, le=100000, description="当前可用库存（件）")
+    capacity: int = Field(default=80, ge=0, le=10000, description="产线日产能（件/天）")
+    lead_time: int = Field(default=7, ge=0, le=90, description="供应商补货周期（天）")
+    holidays: int = Field(default=0, ge=0, le=30, description="交期内的节假日天数（产线不排产）")
+
+
+class Day21MappingResult(BaseModel):
+    """Day 21 静态概念数据（三个症状 / 计划字段 / 三种形态 / 动作枚举 / 坑 / 速查表）。"""
+
+    failure_types: list[dict[str, str]] = Field(description="三个症状 + 共同根因")
+    react_vs_plan: list[dict[str, str]] = Field(description="ReAct 与 Plan-and-Execute 的八个维度对照")
+    plan_fields: list[dict[str, str]] = Field(description="PlanStep 的字段与为什么需要它")
+    invariants: list[dict[str, str]] = Field(description="三条强制不变量")
+    plan_forms: list[dict[str, str]] = Field(description="L1 / L2 / L3 三种形态的治什么与代价")
+    replan_actions: list[dict[str, str]] = Field(description="重规划四个互斥动作")
+    critique_causes: list[dict[str, str]] = Field(description="反思归因六个枚举值")
+    metrics: list[dict[str, str]] = Field(description="规划质量四指标与健康值")
+    pitfalls: list[dict[str, str]] = Field(description="六个坑")
+    cheatsheet: list[dict[str, str]] = Field(description="速查表")
+    versions: dict[str, str] = Field(description="依赖版本（langgraph 可能为空）")
+
+
+class Day21FailuresRequest(Day21Facts):
+    """失败复现：选择要看哪一个（或全部三个）没有计划的症状。"""
+
+    symptom: Literal["all", "premature", "monolithic", "no_backtrack"] = Field(
+        default="all", description="premature=该探查就动手 / monolithic=硬扛 / no_backtrack=走错不回头"
+    )
+
+
+class Day21FailuresResult(BaseModel):
+    """复现现场：三条错误轨迹、正确答案与「监控全绿」的反差。"""
+
+    question: str
+    correct_answer: str
+    facts: dict[str, Any]
+    cases: list[dict[str, Any]] = Field(description="每种症状：逐步轨迹 / 答案 / 判定 / 漏掉的事实")
+    summary: dict[str, Any]
+    notes: list[str]
+
+
+class Day21SchemaRequest(BaseModel):
+    """计划校验：挑一个合法/非法计划样本，看 compile 时是否被拦下。"""
+
+    case: Literal["valid", "cycle", "missing_expect", "unknown_dep", "duplicate_id", "self_dep", "too_long"] = Field(
+        default="cycle", description="计划样本：只有 valid 能通过全部校验"
+    )
+
+
+class Day21SchemaResult(BaseModel):
+    """校验现场：Pydantic 错误、三条不变量逐项结果、拓扑分层与可执行步。"""
+
+    case: str
+    raw: dict[str, Any]
+    accepted: bool
+    errors: list[str]
+    checks: list[dict[str, Any]] = Field(description="不变量逐项：名称 / 是否通过 / 说明")
+    topo_levels: list[list[str]] = Field(description="合法计划按依赖分层，同层可并行")
+    ready_steps: list[str] = Field(description="当前可执行（依赖全 done 且 pending）的步骤")
+    notes: list[str]
+
+
+class Day21ExecuteRequest(Day21Facts):
+    """L1 计划先行：选择计划形态，观察「事实来自工具」与 L1 的天花板。"""
+
+    plan_kind: Literal["good", "external_only", "business_expect"] = Field(
+        default="good",
+        description=(
+            "good=库存+产能的正确计划；external_only=只查补货周期（L1 不会回头）；"
+            "business_expect=把验收判据写成业务结论（答案是不能接时会被误判失败）"
+        ),
+    )
+
+
+class Day21ExecuteResult(BaseModel):
+    """L1 现场：计划、拓扑分层、逐步执行与校验、最终答案与治好的症状。"""
+
+    plan: dict[str, Any]
+    levels: list[list[str]]
+    trace: list[dict[str, Any]]
+    answer: str | None
+    failed_at: str | None
+    fixed_symptoms: list[str]
+    unfixed_symptoms: list[str]
+    notes: list[str]
+
+
+class Day21ReplanRequest(Day21Facts):
+    """L2 重规划：偏离后的四种动作，以及「篡改已完成步骤」的对照。"""
+
+    action: Literal["revise", "finish", "abort", "repeat"] = Field(
+        default="revise", description="revise=补自产分支 / finish=提前收尾 / abort=放弃 / repeat=同一补丁重复（死循环）"
+    )
+    tamper_done: bool = Field(default=False, description="True 时先尝试放宽已完成 s1 的判据，应被账本不变量拒绝")
+
+
+class Day21ReplanResult(BaseModel):
+    """L2 现场：计划版本链、执行轨迹、补丁、防乒乓结论与账本完整性检查。"""
+
+    plans: list[dict[str, Any]] = Field(description="每一次计划升级后的版本快照")
+    trace: list[dict[str, Any]]
+    patches: list[dict[str, Any]]
+    answer: str | None
+    guard: str = Field(description="正常 / 重复补丁死循环 / 重规划预算耗尽 等结论")
+    integrity_check: dict[str, Any]
+    notes: list[str]
+
+
+class Day21ReflexionRequest(Day21Facts):
+    """L3 反思：验收判据写「算对没有」还是「结果如不如愿」，以及批评是否有信息量。"""
+
+    expect_mode: Literal["correctness", "outcome"] = Field(default="correctness")
+    critique_style: Literal["actionable", "self_praise"] = Field(default="actionable")
+    prior_same_errors: int = Field(default=0, ge=0, le=2, description="同类错误此前发生过几次（2 次升级为硬约束）")
+
+
+class Day21ReflexionResult(BaseModel):
+    """L3 现场：每次尝试、批评、教训升级与最终判定。"""
+
+    expect: dict[str, Any]
+    attempts: list[dict[str, Any]]
+    critiques: list[dict[str, Any]]
+    lesson: str
+    verdict: str
+    answer: str | None
+    notes: list[str]
+
+
+class Day21GraphRequest(Day21Facts):
+    """图编排：plan→execute→route→replan/reflect→finish，计划变更走人工中断。"""
+
+    scenario: Literal["normal", "patch"] = Field(default="patch", description="normal=一路顺风；patch=偏离后重规划并审批")
+    approve: bool = Field(default=True, description="人工是否批准计划补丁（False 走 abort）")
+    reflexion_left: int = Field(default=0, ge=0, le=2, description="允许的反思次数；>0 时先反思再重规划")
+    recursion_limit: int = Field(default=30, ge=5, le=100, description="LangGraph 超步上限")
+
+
+class Day21GraphResult(BaseModel):
+    """图现场：人工中断载荷、审批结论、逐节点审计与最终答案。"""
+
+    scenario: str
+    answer: str | None
+    interrupt_payload: dict[str, Any] | None
+    approved: bool | None
+    audit: list[str]
+    plan: dict[str, Any]
+    notes: list[str]
+
+
+class Day21EvalRequest(BaseModel):
+    """规划质量评估：方案、样本数、三条门禁阈值。"""
+
+    scheme: Literal["all", "react", "l1", "l2", "l3"] = Field(default="all")
+    cases: int = Field(default=25, ge=5, le=100, description="合成冒烟样本数")
+    gate_validity: float = Field(default=0.98, ge=0, le=1, description="计划合法率门禁")
+    gate_first_pass: float = Field(default=0.75, ge=0, le=1, description="首次通过率门禁")
+    gate_false_finish: float = Field(default=0.05, ge=0, le=1, description="假完成率门禁（越低越好）")
+
+
+class Day21EvalResult(BaseModel):
+    """评估现场：四档方案指标表、课程参考值、门禁结论与样本明细。"""
+
+    dataset_size: int
+    optimal_steps: float
+    summary: list[dict[str, Any]]
+    course_reference: list[dict[str, str]] = Field(description="课程原文的 12 条数据集结果（对照用）")
+    gate: dict[str, Any]
+    rows: list[dict[str, Any]] = Field(description="逐 case 判定明细（前若干条）")
+    notes: list[str]

@@ -171,6 +171,21 @@ from app.modules.study.schemas.study import (
     Day20ShutdownResult,
     Day20SloRequest,
     Day20SloResult,
+    Day21EvalRequest,
+    Day21EvalResult,
+    Day21ExecuteRequest,
+    Day21ExecuteResult,
+    Day21FailuresRequest,
+    Day21FailuresResult,
+    Day21GraphRequest,
+    Day21GraphResult,
+    Day21MappingResult,
+    Day21ReflexionRequest,
+    Day21ReflexionResult,
+    Day21ReplanRequest,
+    Day21ReplanResult,
+    Day21SchemaRequest,
+    Day21SchemaResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -206,6 +221,7 @@ from app.modules.study.services import (
     day18_security,
     day19_service,
     day20_reliability,
+    day21_planning,
     long_memory,
     rag,
     react_loop,
@@ -1913,3 +1929,91 @@ async def run_day20_slo(payload: Day20SloRequest) -> APIResponse[Day20SloResult]
 async def run_day20_chaos(payload: Day20ChaosRequest) -> APIResponse[Day20ChaosResult]:
     """模拟注入下的 run，并逐条核对五条预期：判定落空处就是可靠性盲区。"""
     return APIResponse(data=day20_reliability.chaos_demo(payload))
+
+
+# ============================================================
+# Day 21 规划能力：失败复现 / 计划校验 / L1 / L2 / L3 / 图编排 / 评估门禁
+# ============================================================
+
+
+@router.get(
+    "/day21/mapping",
+    response_model=APIResponse[Day21MappingResult],
+    summary="Day 21 概念数据：三症状 / ReAct 对照 / 计划字段 / 三不变量 / 三形态 / 坑 / 速查表",
+)
+async def get_day21_mapping() -> APIResponse[Day21MappingResult]:
+    """返回静态概念数据；不调模型、不起服务、不写文件。"""
+    return APIResponse(data=day21_planning.mapping())
+
+
+@router.post(
+    "/day21/failures",
+    response_model=APIResponse[Day21FailuresResult],
+    summary="Day 21 课程 01：复现三种「没有计划」的失败（监控全绿但答案错）",
+)
+async def run_day21_failures(payload: Day21FailuresRequest) -> APIResponse[Day21FailuresResult]:
+    """剧本回放 ReAct 循环，逐条给出漏掉的事实与正确答案。"""
+    return APIResponse(data=day21_planning.failures_demo(payload))
+
+
+@router.post(
+    "/day21/schema",
+    response_model=APIResponse[Day21SchemaResult],
+    summary="Day 21 课程 02：计划结构 + 三条不变量校验 + DAG 拓扑分层",
+)
+async def run_day21_schema(payload: Day21SchemaRequest) -> APIResponse[Day21SchemaResult]:
+    """编译计划样本：非法计划在执行前就被拦下。"""
+    return APIResponse(data=day21_planning.schema_demo(payload))
+
+
+@router.post(
+    "/day21/execute",
+    response_model=APIResponse[Day21ExecuteResult],
+    summary="Day 21 课程 03：L1 计划先行（Planner → Executor → Validator）",
+)
+async def run_day21_execute(payload: Day21ExecuteRequest) -> APIResponse[Day21ExecuteResult]:
+    """逐层执行并机器校验；L1 治漏探查与硬扛，治不了走错不回头。"""
+    return APIResponse(data=day21_planning.execute_demo(payload))
+
+
+@router.post(
+    "/day21/replan",
+    response_model=APIResponse[Day21ReplanResult],
+    summary="Day 21 课程 04：L2 偏离重规划（四动作 / 账本冻结 / 防乒乓）",
+)
+async def run_day21_replan(payload: Day21ReplanRequest) -> APIResponse[Day21ReplanResult]:
+    """外采失败补自产分支；已完成步骤不可修改，重复补丁直接熔断。"""
+    return APIResponse(data=day21_planning.replan_demo(payload))
+
+
+@router.post(
+    "/day21/reflexion",
+    response_model=APIResponse[Day21ReflexionResult],
+    summary="Day 21 课程 05：L3 反思回路（根因枚举 / 可执行指令 / 教训升级）",
+)
+async def run_day21_reflexion(payload: Day21ReflexionRequest) -> APIResponse[Day21ReflexionResult]:
+    """纯逻辑演示算错→归因→重试，以及把业务结论写成判据造成的假失败。"""
+    return APIResponse(data=day21_planning.reflexion_demo(payload))
+
+
+@router.post(
+    "/day21/graph",
+    response_model=APIResponse[Day21GraphResult],
+    summary="Day 21 课程 06：LangGraph 计划图（路由 / 反思 / 重规划 / 中断审批）",
+)
+async def run_day21_graph(payload: Day21GraphRequest) -> APIResponse[Day21GraphResult]:
+    """真实状态图跑通路由循环；计划变更先人审，拒绝则走 abort。"""
+    try:
+        return APIResponse(data=day21_planning.graph_demo(payload))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/day21/eval",
+    response_model=APIResponse[Day21EvalResult],
+    summary="Day 21 课程 07：规划质量四指标 + A/B/C/D 四档对照 + CI 门禁",
+)
+async def run_day21_eval(payload: Day21EvalRequest) -> APIResponse[Day21EvalResult]:
+    """同一份合成数据集跑四档方案，按三条阈值给门禁结论。"""
+    return APIResponse(data=day21_planning.eval_demo(payload))
