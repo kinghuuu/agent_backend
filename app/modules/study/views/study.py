@@ -186,6 +186,25 @@ from app.modules.study.schemas.study import (
     Day21ReplanResult,
     Day21SchemaRequest,
     Day21SchemaResult,
+    Day22AstRequest,
+    Day22AstResult,
+    Day22BridgeRequest,
+    Day22BridgeResult,
+    Day22ContainerRequest,
+    Day22ContainerResult,
+    Day22L1Request,
+    Day22L1Result,
+    Day22LoopRequest,
+    Day22LoopResult,
+    Day22MappingResult,
+    Day22NetfsRequest,
+    Day22NetfsResult,
+    Day22PressureRequest,
+    Day22PressureResult,
+    Day22ProductionRequest,
+    Day22ProductionResult,
+    Day22WhyRequest,
+    Day22WhyResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -222,6 +241,7 @@ from app.modules.study.services import (
     day19_service,
     day20_reliability,
     day21_planning,
+    day22_sandbox,
     long_memory,
     rag,
     react_loop,
@@ -2017,3 +2037,117 @@ async def run_day21_graph(payload: Day21GraphRequest) -> APIResponse[Day21GraphR
 async def run_day21_eval(payload: Day21EvalRequest) -> APIResponse[Day21EvalResult]:
     """同一份合成数据集跑四档方案，按三条阈值给门禁结论。"""
     return APIResponse(data=day21_planning.eval_demo(payload))
+
+
+# ============================================================
+# Day 22 代码执行沙箱：分工 / AST / L1 / 网络文件 / L2 / 代码循环 / 生产 / 压测
+# ============================================================
+
+
+@router.get(
+    "/day22/mapping",
+    response_model=APIResponse[Day22MappingResult],
+    summary="Day 22 概念数据：七类威胁 / 五级隔离 / 五道闸 / 容器参数 / 六个坑 / 速查表",
+)
+async def get_day22_mapping() -> APIResponse[Day22MappingResult]:
+    """返回静态概念表与当前平台的能力（resource / docker 是否可用）。"""
+    return APIResponse(data=day22_sandbox.mapping())
+
+
+@router.post(
+    "/day22/why",
+    response_model=APIResponse[Day22WhyResult],
+    summary="Day 22 课程 01：模型心算错 + exec 清空 builtins 仍可逃逸（安全探针）",
+)
+async def run_day22_why(payload: Day22WhyRequest) -> APIResponse[Day22WhyResult]:
+    """回放两种失败，并执行一条只取 pid 的安全逃逸链验证课程修正。"""
+    return APIResponse(data=day22_sandbox.why_demo(payload))
+
+
+@router.post(
+    "/day22/ast",
+    response_model=APIResponse[Day22AstResult],
+    summary="Day 22 课程 02：AST 筛查的五个样本 + 四种绕过（lint 不是 jail）",
+)
+async def run_day22_ast(payload: Day22AstRequest) -> APIResponse[Day22AstResult]:
+    """逐条给出放行/拦截与命中原因，暴露「手滑写文件没拦住」「两种绕过漏了」。"""
+    return APIResponse(data=day22_sandbox.ast_demo(payload))
+
+
+@router.post(
+    "/day22/l1",
+    response_model=APIResponse[Day22L1Result],
+    summary="Day 22 课程 03：L1 子进程 + rlimit + 独立 cwd + 进程组清理",
+)
+async def run_day22_l1(payload: Day22L1Request) -> APIResponse[Day22L1Result]:
+    """默认回放课程实测；mode=live 真起子进程，fork bomb 与 Windows 内存炸弹跳过。"""
+    try:
+        return APIResponse(data=day22_sandbox.l1_demo(payload))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/day22/netfs",
+    response_model=APIResponse[Day22NetfsResult],
+    summary="Day 22 课程 04：软断网被 _socket 绕过，L1 可读可写宿主机文件",
+)
+async def run_day22_netfs(payload: Day22NetfsRequest) -> APIResponse[Day22NetfsResult]:
+    """四条探针对照：哪条被拦、哪条墙根本不存在。"""
+    try:
+        return APIResponse(data=day22_sandbox.netfs_demo(payload))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/day22/container",
+    response_model=APIResponse[Day22ContainerResult],
+    summary="Day 22 课程 05：L2 容器九个安全参数 + 六条隔离探针",
+)
+async def run_day22_container(payload: Day22ContainerRequest) -> APIResponse[Day22ContainerResult]:
+    """生成完整 docker 命令并回放探针；live=true 且 docker 可用时跑一条纯计算探针。"""
+    return APIResponse(data=day22_sandbox.container_demo(payload))
+
+
+@router.post(
+    "/day22/loop",
+    response_model=APIResponse[Day22LoopResult],
+    summary="Day 22 课程 06：写代码→执行→看报错→改代码（错误五要素回填）",
+)
+async def run_day22_loop(payload: Day22LoopRequest) -> APIResponse[Day22LoopResult]:
+    """脚本化 coder + 假 runner，零 token 复现三次收敛与同类错误换策略。"""
+    return APIResponse(data=day22_sandbox.loop_demo(payload))
+
+
+@router.post(
+    "/day22/bridge",
+    response_model=APIResponse[Day22BridgeResult],
+    summary="Day 22 练习 1：Day 21 的 s3 换真执行器，stdout 字符串解析后过机器判据",
+)
+async def run_day22_bridge(payload: Day22BridgeRequest) -> APIResponse[Day22BridgeResult]:
+    """生成三行计算代码，执行后用 float(stdout) 交给 Day 21 的 verify()。"""
+    try:
+        return APIResponse(data=day22_sandbox.bridge_demo(payload))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/day22/production",
+    response_model=APIResponse[Day22ProductionResult],
+    summary="Day 22 课程 07：画像 / AST / 缓存 / 池化 / 审计 / 指标的完整请求路径",
+)
+async def run_day22_production(payload: Day22ProductionRequest) -> APIResponse[Day22ProductionResult]:
+    """按代码高危模式与任务类型选档，逐道闸记录放行或短路。"""
+    return APIResponse(data=day22_sandbox.production_demo(payload))
+
+
+@router.post(
+    "/day22/pressure",
+    response_model=APIResponse[Day22PressureResult],
+    summary="Day 22 练习 2/3：十条攻击 × L1/L2 拦截矩阵 + 同类错误升级收益",
+)
+async def run_day22_pressure(payload: Day22PressureRequest) -> APIResponse[Day22PressureResult]:
+    """把 L1 漏掉的 T1/T2 与「杀错进程」摆到台面上，附首次通过率对照。"""
+    return APIResponse(data=day22_sandbox.pressure_demo(payload))

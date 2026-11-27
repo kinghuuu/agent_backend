@@ -2776,3 +2776,206 @@ class Day21EvalResult(BaseModel):
     gate: dict[str, Any]
     rows: list[dict[str, Any]] = Field(description="逐 case 判定明细（前若干条）")
     notes: list[str]
+
+
+# ============================================================
+# Day 22 代码执行沙箱
+# ============================================================
+
+
+class Day22MappingResult(BaseModel):
+    """Day 22 静态概念数据：分工 / 七类威胁 / 五级隔离 / 五道闸 / 容器参数 / 六个坑。"""
+
+    why_calc: list[dict[str, str]] = Field(description="为什么让模型算数是伪需求（三种必错场景）")
+    division: list[dict[str, str]] = Field(description="旧分工与新分工的三层职责")
+    routing: list[dict[str, str]] = Field(description="哪些计算走判据 / AST / 沙箱 / 拒绝")
+    threats: list[dict[str, str]] = Field(description="T1~T7 七类威胁、典型代码与对应闸门")
+    levels: list[dict[str, str]] = Field(description="L0~L4 五种隔离等级的成本与逃逸难度")
+    decision_tree: list[dict[str, str]] = Field(description="代码来源 → 隔离等级选型")
+    gates: list[dict[str, str]] = Field(description="五道闸各自挡什么、挡不住什么")
+    container_args: list[dict[str, str]] = Field(description="容器九类安全参数与不装的后果")
+    limits: list[dict[str, str]] = Field(description="CPU / 内存 / 进程数 / 文件大小 / wall clock 的对应手段")
+    metrics: list[dict[str, str]] = Field(description="沙箱服务四个指标与健康值")
+    pitfalls: list[dict[str, str]] = Field(description="六个坑")
+    cheatsheet: list[dict[str, str]] = Field(description="速查表")
+    audit_fields: list[str] = Field(description="每次执行必须留的审计字段")
+    timeout_profiles: list[dict[str, Any]] = Field(description="四档超时/内存/CPU 画像")
+    environment: dict[str, str] = Field(description="当前平台、Python 版本、docker 是否可用")
+
+
+class Day22WhyRequest(BaseModel):
+    """失败复现：脚本化两种失败——模型心算错，以及 exec 的逃逸链。"""
+
+    question: str = Field(default="订单总额 1,234,567.89 元，税率 7.35%，请算出税额（保留两位小数）。", max_length=300)
+
+
+class Day22WhyResult(BaseModel):
+    """复现现场：格式完美但数字错的回答 + 逃逸链逐步（只做安全探针，不碰密钥）。"""
+
+    question: str
+    exact_value: float
+    llm_answer: str
+    llm_wrong: bool
+    exec_cases: list[dict[str, Any]]
+    corrections: list[str] = Field(description="课程原文与实际 CPython 行为不符之处")
+    notes: list[str]
+
+
+class Day22AstRequest(BaseModel):
+    """AST 筛查：课程里的正常/手滑样本 + 四种绕过样本。"""
+
+    case: Literal["all", "normal", "write", "import_os", "env", "dunder", "bypass"] = Field(default="all")
+
+
+class Day22AstResult(BaseModel):
+    """筛查现场：每条样本的放行/拦截、命中原因与审计记录。"""
+
+    cases: list[dict[str, Any]]
+    bypass_leaked: int = Field(description="四种绕过里被放过的条数（字符串拼接 + 拼调用名的 hex exec）")
+    write_file_blocked: bool = Field(description="覆盖源文件的手滑是否被 AST 拦下（应为 False）")
+    notes: list[str]
+
+
+class Day22L1Request(BaseModel):
+    """L1 子进程沙箱：默认回放课程实测，live 时真起子进程（跳过 fork bomb）。"""
+
+    case: Literal["all", "normal", "cpu", "sleep", "mem", "fork", "env"] = Field(default="all")
+    mode: Literal["simulate", "live"] = Field(default="simulate")
+    wall_timeout: int = Field(default=3, ge=1, le=10)
+    mem_mb: int = Field(default=256, ge=32, le=512)
+    cpu_s: int = Field(default=2, ge=1, le=10)
+    custom_code: str | None = Field(default=None, max_length=4000, description="自定义代码，先过 AST 筛查再执行")
+
+
+class Day22L1Result(BaseModel):
+    """L1 现场：退出码映射、hit_limit、截断后的输出与平台能力边界。"""
+
+    platform: str
+    mode: str
+    cases: list[dict[str, Any]]
+    limits: dict[str, str] = Field(description="当前平台实际生效的限制手段")
+    notes: list[str]
+
+
+class Day22NetfsRequest(BaseModel):
+    """网络与文件系统：软断网能不能挡、L1 的墙在哪里。"""
+
+    probe: Literal["all", "socket", "raw_socket", "host_read", "host_write"] = Field(default="all")
+    mode: Literal["simulate", "live"] = Field(default="simulate")
+
+
+class Day22NetfsResult(BaseModel):
+    """探针现场：软断网被 `_socket` 绕过、宿主文件可读可写。"""
+
+    guard_code: str = Field(description="runner 里替换 socket 的软断网代码")
+    probes: list[dict[str, Any]]
+    broken: int = Field(description="被绕过的探针数")
+    notes: list[str]
+
+
+class Day22ContainerRequest(BaseModel):
+    """L2 容器：逐参数生成 docker 命令，回放探针；live 可真跑一条安全探针。"""
+
+    mem_mb: int = Field(default=512, ge=64, le=2048)
+    cpus: float = Field(default=0.5, ge=0.1, le=4)
+    pids_limit: int = Field(default=64, ge=8, le=512)
+    wall_timeout: int = Field(default=8, ge=1, le=30)
+    mount_env: bool = Field(default=False, description="演示「挂载边界=暴露边界」：把假 .env 挂进 /in")
+    live: bool = Field(default=False, description="docker 可用时真跑一条纯计算探针")
+
+
+class Day22ContainerResult(BaseModel):
+    """容器现场：完整命令、九个参数各自的理由、六条探针与隔离边界说明。"""
+
+    command: str
+    args: list[dict[str, str]]
+    probes: list[dict[str, Any]]
+    docker_available: bool
+    live_result: dict[str, Any] | None
+    notes: list[str]
+
+
+class Day22LoopRequest(BaseModel):
+    """写代码→执行→看报错→改代码：脚本化 coder + 假 runner，可复现且零 token。"""
+
+    scenario: Literal["pandas_append", "key_error", "timeout", "same_error"] = Field(default="pandas_append")
+    max_tries: int = Field(default=3, ge=1, le=5)
+    escalate: bool = Field(default=False, description="练习 3：同类错误第二次出现时换策略，不在原方案上重试")
+
+
+class Day22LoopResult(BaseModel):
+    """循环现场：每次的代码、错误摘要、回填给模型的 feedback 与最终判定。"""
+
+    attempts: list[dict[str, Any]]
+    feedback: list[str] = Field(description="每次回填给模型的压缩提示（错误五要素）")
+    answer: str | None
+    tries: int
+    strategy_switches: list[str] = Field(description="同类错误升级换策略的记录")
+    notes: list[str]
+
+
+class Day22BridgeRequest(BaseModel):
+    """练习 1：把 Day 21 的 s3 纯推理步换成真执行器，处理 stdout 字符串。"""
+
+    available: int = Field(default=120, ge=0, le=100000)
+    days: float = Field(default=5, ge=0.1, le=60)
+    per_day: int = Field(default=80, ge=0, le=10000)
+    expect_value: float = Field(default=500, ge=0, le=1000000)
+    expect_op: Literal[">=", ">", "==", "<=", "<"] = Field(default=">=")
+    mode: Literal["simulate", "live"] = Field(default="simulate")
+
+
+class Day22BridgeResult(BaseModel):
+    """桥接现场：生成的代码、stdout 原文与解析后的类型、机器判据结论。"""
+
+    code: str
+    stdout: str
+    raw_type: str
+    parsed_type: str
+    parsed_value: float
+    expect: dict[str, Any]
+    passed: bool
+    reason: str
+    notes: list[str]
+
+
+class Day22ProductionRequest(BaseModel):
+    """生产形态：画像选择、AST、缓存、池化、审计与输出回收的整条请求路径。"""
+
+    task_type: Literal["quick_calc", "data_analysis", "plot", "reject"] = Field(default="quick_calc")
+    code_preset: Literal["normal", "pip_install", "train", "random_now"] = Field(default="normal")
+    pool_size: int = Field(default=4, ge=1, le=16)
+    cache_enabled: bool = Field(default=True)
+
+
+class Day22ProductionResult(BaseModel):
+    """生产现场：命中哪条画像、短路在哪一道闸、缓存键、池化决策与四个指标。"""
+
+    profile: dict[str, Any]
+    trace: list[dict[str, Any]]
+    result: dict[str, Any]
+    cache_key: str
+    cache_status: str
+    pool: dict[str, Any]
+    audit_fields: list[str]
+    metrics: list[dict[str, str]]
+    notes: list[str]
+
+
+class Day22PressureRequest(BaseModel):
+    """练习 2/3：十条攻击 × L1/L2 拦截矩阵，以及同类错误升级策略的收益。"""
+
+    mode: Literal["all", "l1", "l2"] = Field(default="all", description="对照视角；矩阵始终保留 L1/L2 两列便于并排比较")
+    cases: int = Field(default=10, ge=1, le=10)
+    escalate: bool = Field(default=False)
+
+
+class Day22PressureResult(BaseModel):
+    """压测现场：拦截矩阵、L1 漏了几条、升级策略前后的首次通过率。"""
+
+    matrix: list[dict[str, Any]]
+    l1_blocked: int
+    l2_blocked: int
+    escalation: dict[str, Any]
+    notes: list[str]
+
