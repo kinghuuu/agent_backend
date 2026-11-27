@@ -128,6 +128,22 @@ from app.modules.study.schemas.study import (
     Day17ParallelResult,
     Day17RouterRequest,
     Day17RouterResult,
+    Day18ApprovalRequest,
+    Day18ApprovalResult,
+    Day18AuthzRequest,
+    Day18AuthzResult,
+    Day18ExfilRequest,
+    Day18ExfilResult,
+    Day18FenceRequest,
+    Day18FenceResult,
+    Day18InjectionRequest,
+    Day18InjectionResult,
+    Day18MappingResult,
+    Day18PipelineRequest,
+    Day18PipelineResult,
+    Day18SandboxRequest,
+    Day18SandboxResult,
+    Day18SuiteResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -160,6 +176,7 @@ from app.modules.study.services import (
     day15_observability,
     day16_eval,
     day17_cost,
+    day18_security,
     long_memory,
     rag,
     react_loop,
@@ -1541,3 +1558,114 @@ async def run_day17_ab(payload: Day17AbRequest, db: AsyncSession = Depends(get_d
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return APIResponse(data=result)
+
+
+# ============================================================
+# Day 18 安全防护：注入 / 围栏 / 权限 / 外泄 / 确认门 / 沙箱 / 流水线
+# ============================================================
+
+
+@router.get(
+    "/day18/mapping",
+    response_model=APIResponse[Day18MappingResult],
+    summary="Day 18 概念数据：五类威胁 / 三条原则 + fail-closed / 攻击面 / 坑 / 速查表 / 沙箱矩阵",
+)
+async def get_day18_mapping() -> APIResponse[Day18MappingResult]:
+    """返回静态概念数据 + canary + 落盘路径（不调模型、不跑子进程）。"""
+    return APIResponse(data=day18_security.mapping())
+
+
+@router.post(
+    "/day18/injection",
+    response_model=APIResponse[Day18InjectionResult],
+    summary="Day 18 课程 01：间接注入复现（无害输入 + 有毒工具结果 → 转走 9999）",
+)
+async def run_day18_injection(payload: Day18InjectionRequest) -> APIResponse[Day18InjectionResult]:
+    """纯脚本化模型（不花钱、可复现）：同一条毒工单跑 naive / fence_only / guarded 三遍。"""
+    try:
+        result = day18_security.injection_demo(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day18/fence",
+    response_model=APIResponse[Day18FenceResult],
+    summary="Day 18 课程 02：围栏 + 双向扫描（入站命中 / 出站越界 / 变形样本矩阵）",
+)
+async def run_day18_fence(payload: Day18FenceRequest) -> APIResponse[Day18FenceResult]:
+    """纯逻辑：围栏、归一化、规则命中、行为校验，全部可单测。"""
+    return APIResponse(data=day18_security.fence_demo(payload))
+
+
+@router.post(
+    "/day18/authz",
+    response_model=APIResponse[Day18AuthzResult],
+    summary="Day 18 课程 03：最小权限与 IDOR（身份网关注入 / 越权 NotFound / 好签名坏签名对照）",
+)
+async def run_day18_authz(payload: Day18AuthzRequest) -> APIResponse[Day18AuthzResult]:
+    """纯逻辑：按 role/scopes 发工具、行级校验、收款账户服务端解析。"""
+    return APIResponse(data=day18_security.authz_demo(payload))
+
+
+@router.post(
+    "/day18/exfil",
+    response_model=APIResponse[Day18ExfilResult],
+    summary="Day 18 课程 04：数据外泄（markdown 图片默认拦 / 裸链去活化 / PII 脱敏 / canary）",
+)
+async def run_day18_exfil(payload: Day18ExfilRequest) -> APIResponse[Day18ExfilResult]:
+    """纯逻辑出站清洗，并附 8 条自检样本对照。"""
+    return APIResponse(data=day18_security.exfil_demo(payload))
+
+
+@router.post(
+    "/day18/approval",
+    response_model=APIResponse[Day18ApprovalResult],
+    summary="Day 18 课程 05：危险操作确认门（interrupt 在副作用之前 + 幂等账本 + 闸位置对照）",
+)
+def run_day18_approval(payload: Day18ApprovalRequest) -> APIResponse[Day18ApprovalResult]:
+    """同步执行（LangGraph 同步 invoke）：FastAPI 会放进线程池，不阻塞事件循环。"""
+    try:
+        result = day18_security.approval_demo(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"确认门实验失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day18/sandbox",
+    response_model=APIResponse[Day18SandboxResult],
+    summary="Day 18 课程 06：代码执行沙箱（独立进程 + 资源限制，并明确挡不住什么）",
+)
+def run_day18_sandbox(payload: Day18SandboxRequest) -> APIResponse[Day18SandboxResult]:
+    """跑预设攻击样例或自定义代码；每个样例都有超时兜底。"""
+    try:
+        result = day18_security.sandbox_demo(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"沙箱实验失败：{exc}") from exc
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/day18/pipeline",
+    response_model=APIResponse[Day18PipelineResult],
+    summary="Day 18 课程 07：安全中间件流水线（六道中间件，任一 deny 立即短路）",
+)
+async def run_day18_pipeline(payload: Day18PipelineRequest) -> APIResponse[Day18PipelineResult]:
+    """纯逻辑：结论 + 短路点 + 逐中间件 audit + 清洗后的上下文。"""
+    return APIResponse(data=day18_security.pipeline_demo(payload))
+
+
+@router.get(
+    "/day18/attack-suite",
+    response_model=APIResponse[Day18SuiteResult],
+    summary="Day 18 课程 07：攻击集回归（10 条攻击的期望 vs 实际 + 通过率）",
+)
+async def run_day18_attack_suite() -> APIResponse[Day18SuiteResult]:
+    """安全也要有回归集：改 prompt / 换模型 / 加工具都要重跑这 10 条。"""
+    return APIResponse(data=day18_security.attack_suite())
