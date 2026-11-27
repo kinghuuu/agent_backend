@@ -2384,3 +2384,213 @@ class Day19SkeletonResult(BaseModel):
     skeleton_code: str
     checklist: list[str]
     notes: list[str]
+
+
+# ============================================================
+# Day 20 可靠性
+# ============================================================
+
+
+class Day20MappingResult(BaseModel):
+    """Day 20 静态概念数据（故障四分类 / 重试三要素 / 降级阶梯 / 退出时序 / 容量天花板 / SLO / 坑 / 速查表）。"""
+
+    error_classes: list[dict[str, str]] = Field(description="瞬态 / 确定性 / 可换路 / 逻辑性四类错误")
+    retry_rules: list[dict[str, str]] = Field(description="退化退避三要素：退避 / 抖动 / 上限")
+    ladder_levels: list[dict[str, str]] = Field(description="L0 主模型 → L1 备模型 → L2 缓存 → L3 结构化道歉")
+    shutdown_steps: list[dict[str, str]] = Field(description="SIGTERM 之后的六步退出时序")
+    capacity_ceilings: list[dict[str, str]] = Field(description="钱 / 上游配额 / 机器资源三道天花板")
+    slo_table: list[dict[str, str]] = Field(description="最小 SLO 集：SLI / SLO / 数据来源 / 为什么重要")
+    alert_principles: list[dict[str, str]] = Field(description="烧毁率 / 最小样本量 / 自带 runbook")
+    chaos_redlines: list[str] = Field(description="混沌演练的三条红线")
+    pitfalls: list[dict[str, str]] = Field(description="可靠性工程常见的坑")
+    cheatsheet: list[dict[str, str]] = Field(description="速查表")
+    runbooks: dict[str, list[str]] = Field(description="按烧毁类型给的处置手册")
+    versions: dict[str, str]
+
+
+class Day20RetryRequest(BaseModel):
+    """重试实验：错误场景、失败次数、退避参数与 run 级预算。"""
+
+    scenario: Literal["transient", "rate_limit", "permanent", "invalid_output", "unknown"] = Field(
+        default="rate_limit",
+        description="模拟哪一类异常：瞬态 / 429 / 确定性 / 解析失败 / 未知",
+    )
+    fail_times: int = Field(default=2, ge=0, le=6, description="前 N 次调用失败，第 N+1 次成功（0 = 一次就成）")
+    max_attempts: int = Field(default=3, ge=1, le=6, description="单步重试硬上限")
+    base_ms: int = Field(default=500, ge=50, le=5000, description="退避基数")
+    cap_ms: int = Field(default=8000, ge=500, le=60000, description="单次等待上限")
+    retry_after_ms: int = Field(default=1500, ge=0, le=60000, description="429 响应里的 Retry-After（必须尊重）")
+    seed: int = Field(default=20, description="抖动随机种子，固定后可复现")
+    llm_calls: int = Field(default=9, ge=0, le=100, description="该 run 已消耗的 LLM 调用次数")
+    elapsed_s: float = Field(default=14.0, ge=0, le=600, description="该 run 已耗时（秒）")
+
+
+class Day20RetryResult(BaseModel):
+    """重试现场：分类结论、逐次时间线、run 级预算、并发脉冲对照。"""
+
+    scenario: str
+    classification: dict[str, str] = Field(description="异常类型 → 动作 → 为什么")
+    timeline: list[dict[str, Any]] = Field(description="每次尝试：结果 / 动作 / 等待 / prompt 回填")
+    summary: dict[str, Any] = Field(description="尝试次数、是否成功、总等待、最终出口")
+    budget: dict[str, Any] = Field(description="run 级总预算：调用数 / 墙钟 / 是否越界")
+    pulse: dict[str, Any] = Field(description="裸重试的同步脉冲 vs 带抖动打散")
+    notes: list[str]
+
+
+class Day20LadderRequest(BaseModel):
+    """降级阶梯实验：主路是否恢复、备路能力、缓存命中与探活序列。"""
+
+    query: str = Field(default="怎么配置 LangGraph 的 checkpointer？", min_length=1, max_length=200)
+    primary_ok: bool = Field(default=False, description="主模型重试 max 次后是否已恢复")
+    primary_fail_times: int = Field(default=3, ge=1, le=6, description="主模型失败尝试次数（写进轨迹）")
+    fallback_ok: bool = Field(default=True, description="备模型本次是否可用")
+    fallback_supports_tools: bool = Field(default=True, description="备模型是否支持 function calling（能力对齐）")
+    needs_tools: bool = Field(default=False, description="本次 run 是否需要调工具")
+    cache_hit: bool = Field(default=False, description="L2 语义缓存是否命中")
+    recover_after: int = Field(default=3, ge=1, le=6, description="探活窗口：连续成功几次才回主路")
+    probe_sequence: list[bool] = Field(
+        default_factory=lambda: [True, True, False, True, True, True],
+        description="探活序列：每次主路探测是否成功（演示乒乓与回主路）",
+    )
+
+
+class Day20LadderResult(BaseModel):
+    """降级现场：逐级尝试、最终回答、缓存铁律、探活窗口。"""
+
+    query: str
+    attempts: list[dict[str, Any]] = Field(description="每一级：结果（ok/failed/skipped）/ 原因 / degraded")
+    final: dict[str, Any] = Field(description="最终交付：answer 预览 / degraded / reason / level")
+    cache: dict[str, Any] = Field(description="降级答案不回写缓存：写入与否 + 第二次查询会怎样")
+    probe: list[dict[str, Any]] = Field(description="探活窗口逐次状态：是否回主路、是否乒乓")
+    notes: list[str]
+
+
+class Day20ShutdownRun(BaseModel):
+    """一个在途 run：还要跑多久、有没有 checkpointer。"""
+
+    run_id: str = Field(default="r-1", min_length=1, max_length=40)
+    remaining_s: float = Field(default=8, ge=0, le=600, description="从 SIGTERM 起还要跑多久")
+    checkpointed: bool = Field(default=True, description="是否有 checkpointer（决定死后能不能续跑）")
+
+
+class Day20ShutdownRequest(BaseModel):
+    """优雅退出实验：宽限期、编排器配置、在途 run 清单。"""
+
+    grace_seconds: float = Field(default=25, ge=1, le=120, description="drain 窗口（要小于 terminationGracePeriod）")
+    prestop_sleep_s: float = Field(default=5, ge=0, le=60, description="preStop sleep：等 LB 规则传播")
+    lb_propagation_s: float = Field(default=5, ge=0, le=60, description="摘流量规则在各节点生效的延迟")
+    new_requests: int = Field(default=6, ge=0, le=50, description="SIGTERM 后仍在打进来的请求数")
+    flush_trace: bool = Field(default=True, description="退出前是否 flush trace / 日志")
+    runs: list[Day20ShutdownRun] = Field(
+        default_factory=lambda: [
+            Day20ShutdownRun(run_id="r-1", remaining_s=6, checkpointed=True),
+            Day20ShutdownRun(run_id="r-2", remaining_s=42, checkpointed=True),
+            Day20ShutdownRun(run_id="r-3", remaining_s=90, checkpointed=False),
+        ],
+        description="在途 run 清单",
+    )
+
+
+class Day20ShutdownResult(BaseModel):
+    """退出现场：时间线、每个 run 的结局、计数、编排器配置。"""
+
+    config: dict[str, Any]
+    timeline: list[dict[str, Any]] = Field(description="SIGTERM 之后的逐秒动作")
+    runs: list[dict[str, Any]] = Field(description="每个 run 的结局：跑完 / 落盘可续跑 / 被 SIGKILL 撕碎")
+    counters: dict[str, Any]
+    k8s_snippet: str = Field(description="可直接抄的 terminationGracePeriodSeconds + preStop")
+    verdict: str
+    notes: list[str]
+
+
+class Day20CapacityRequest(BaseModel):
+    """容量评估：钱 / 上游配额 / 机器资源三道天花板 + 恒定速率压测。"""
+
+    monthly_budget: float = Field(
+        default=200000,
+        ge=1,
+        le=10000000,
+        description="月预算（美元）：课程原文 3000 只能撑 0.13 run/s，改成 3000 可看「钱先成为天花板」",
+    )
+    run_cost: float = Field(default=0.009, ge=0.0001, le=10, description="单 run 平均成本（美元）")
+    rpm: int = Field(default=3000, ge=1, le=1000000, description="提供商每分钟请求上限")
+    calls_per_run: float = Field(default=6, ge=1, le=50, description="每 run 平均 LLM 调用数")
+    latency_s: float = Field(default=12.4, ge=0.5, le=600, description="单 run 平均停留时间")
+    replicas: int = Field(default=4, ge=1, le=64, description="副本数")
+    headroom: float = Field(default=0.2, ge=0, le=1, description="余量比例")
+    machine_conc_per_replica: int = Field(default=64, ge=1, le=1000, description="机器资源允许的单副本并发")
+    naive_semaphore: int = Field(default=8, ge=1, le=1000, description="拍脑袋定的 Semaphore（用于对照）")
+    arrival_rps: float | None = Field(default=None, ge=0, le=1000, description="压测施压速率；空 = 用推导值")
+    max_wait_s: float = Field(default=5, ge=0, le=300, description="排队超过这个时长就 503（拒绝比排队便宜）")
+    duration_s: int = Field(default=60, ge=10, le=600, description="压测时长")
+
+
+class Day20CapacityResult(BaseModel):
+    """容量现场：三道天花板、推导过程、Semaphore 建议、压测读数与决策。"""
+
+    ceilings: dict[str, Any] = Field(description="钱 / 上游 / 机器各自能撑多少 run/s")
+    derivation: list[dict[str, str]] = Field(description="从预算到每副本 Semaphore 的推导步骤")
+    semaphore: dict[str, Any] = Field(description="建议并发位 + 与拍脑袋 8 的对照")
+    load_test: dict[str, Any] = Field(description="恒定速率压测的 p50/p95/p99、503 数与吞吐")
+    decision: dict[str, str] = Field(description="读数决策表：这一组读数该做什么")
+    notes: list[str]
+
+
+class Day20SloRequest(BaseModel):
+    """SLO 告警实验：合成 trace、事故窗口与告警阈值。"""
+
+    runs: int = Field(default=800, ge=50, le=20000, description="合成 run 数")
+    duration_min: int = Field(default=360, ge=60, le=1440, description="trace 覆盖的总时长（用于 6 小时长窗口）")
+    incident_min: int = Field(default=60, ge=1, le=720, description="事故持续时长（数据尾部）；填满短窗口才会触发页面告警")
+    bad_rate: float = Field(default=0.18, ge=0, le=1, description="事故期 run 失败率")
+    degraded_rate: float = Field(default=0.45, ge=0, le=1, description="事故期降级率")
+    latency_p95_s: float = Field(default=34, ge=0.5, le=600, description="事故期 p95 时长")
+    baseline_bad: float = Field(default=0.002, ge=0, le=1, description="平时失败率")
+    baseline_degraded: float = Field(default=0.01, ge=0, le=1, description="平时降级率")
+    baseline_p95_s: float = Field(default=12, ge=0.5, le=600, description="平时 p95 时长")
+    min_sample: int = Field(default=50, ge=1, le=1000, description="最小样本量：不足不评估")
+    seed: int = Field(default=7)
+
+
+class Day20SloResult(BaseModel):
+    """SLO 现场：trace 样例、两个窗口的指标与烧毁率、告警判定与 runbook。"""
+
+    sample_lines: list[str] = Field(description="落盘 JSONL 样例（含一行坏数据）")
+    windows: list[dict[str, Any]] = Field(description="短/长窗口：指标 / 烧毁率 / 样本量")
+    alert: dict[str, Any] = Field(description="page / ticket / ok 判定与消息")
+    slo: dict[str, Any] = Field(description="本实验使用的 SLO 目标")
+    notes: list[str]
+
+
+class Day20ChaosRequest(BaseModel):
+    """混沌演练：注入概率、开关，以及三项「有没有做」的工程前置。"""
+
+    seed: int = Field(default=20)
+    steps: int = Field(default=10, ge=3, le=30, description="一次 run 的超步数")
+    llm_429_prob: float = Field(default=0.5, ge=0, le=1, description="每次 LLM 调用被注入 429 的概率")
+    llm_timeout_prob: float = Field(
+        default=0.1,
+        ge=0,
+        le=1,
+        description=(
+            "每次 LLM 调用被注入超时的概率。课程原值 0.3，但与 50% 的 429 叠加后"
+            "「一次调用 4 次尝试全失败」的概率约 17%，第 1 条预期必然落空；这里降到 0.1 "
+            "让 429 成为主场景（调到 0.3 可以看那次落空）"
+        ),
+    )
+    chaos_off: bool = Field(default=False, description="总开关：演练结束后置 True，注入全路径短路")
+    mcp_down: bool = Field(default=True, description="拔掉某个 MCP Server")
+    kill_at_s: int = Field(default=120, ge=0, le=3600, description="第几秒对自己发 SIGTERM")
+    fallback_configured: bool = Field(default=False, description="备模型的 key 是否配到了生产环境（首次演练的坑）")
+    trace_flush: bool = Field(default=True, description="退出前是否 flush trace")
+    tool_short_circuit: bool = Field(default=False, description="同工具连续失败 2 次是否短路")
+
+
+class Day20ChaosResult(BaseModel):
+    """演练现场：注入下的 run 结果 + 五条预期的核对表 + 盲区清单。"""
+
+    injection: dict[str, Any]
+    simulation: dict[str, Any] = Field(description="模拟 run：调用数 / 重试 / 降级 / 裸 500 / 最终状态")
+    expectations: list[dict[str, Any]] = Field(description="预期声明表：预期 vs 实测 vs 判定 vs 盲区")
+    blind_spots: list[str] = Field(description="判定落空的地方 = 可靠性盲区")
+    notes: list[str]

@@ -158,6 +158,19 @@ from app.modules.study.schemas.study import (
     Day19SkeletonResult,
     Day19SsePreviewRequest,
     Day19SsePreviewResult,
+    Day20CapacityRequest,
+    Day20CapacityResult,
+    Day20ChaosRequest,
+    Day20ChaosResult,
+    Day20LadderRequest,
+    Day20LadderResult,
+    Day20MappingResult,
+    Day20RetryRequest,
+    Day20RetryResult,
+    Day20ShutdownRequest,
+    Day20ShutdownResult,
+    Day20SloRequest,
+    Day20SloResult,
     ExtractRunRequest,
     ExtractRunResult,
     KnowledgeDocIn,
@@ -192,6 +205,7 @@ from app.modules.study.services import (
     day17_cost,
     day18_security,
     day19_service,
+    day20_reliability,
     long_memory,
     rag,
     react_loop,
@@ -1824,3 +1838,78 @@ async def run_day19_rollout(payload: Day19RolloutRequest) -> APIResponse[Day19Ro
 async def get_day19_skeleton() -> APIResponse[Day19SkeletonResult]:
     """麻雀虽小四层俱全的最小服务骨架，可直接当新项目起点。"""
     return APIResponse(data=day19_service.skeleton())
+
+
+# ============================================================
+# Day 20 可靠性：分类重试 / 降级阶梯 / 优雅退出 / 容量 / SLO / 混沌
+# ============================================================
+
+
+@router.get(
+    "/day20/mapping",
+    response_model=APIResponse[Day20MappingResult],
+    summary="Day 20 概念数据：故障四分类 / 重试三要素 / 降级阶梯 / 退出时序 / 容量天花板 / SLO / 坑 / 速查表",
+)
+async def get_day20_mapping() -> APIResponse[Day20MappingResult]:
+    """返回静态概念数据 + runbook（不调模型、不起服务、不写文件）。"""
+    return APIResponse(data=day20_reliability.mapping())
+
+
+@router.post(
+    "/day20/retry",
+    response_model=APIResponse[Day20RetryResult],
+    summary="Day 20 课程 01：错误四分类 + 退避抖动重试 + run 级总预算（等待为模拟，不真睡）",
+)
+async def run_day20_retry(payload: Day20RetryRequest) -> APIResponse[Day20RetryResult]:
+    """确定性失败立即上抛、429 尊重 Retry-After、解析失败回填 prompt、耗尽走降级出口。"""
+    return APIResponse(data=day20_reliability.retry_demo(payload))
+
+
+@router.post(
+    "/day20/ladder",
+    response_model=APIResponse[Day20LadderResult],
+    summary="Day 20 课程 02：降级阶梯 L0→L1→L2→L3（能力对齐 / 缓存铁律 / 探活防乒乓）",
+)
+async def run_day20_ladder(payload: Day20LadderRequest) -> APIResponse[Day20LadderResult]:
+    """纯逻辑：备模型不支持 FC 时跳过该级；降级答案不回写缓存；连续成功才回主路。"""
+    return APIResponse(data=day20_reliability.ladder_demo(payload))
+
+
+@router.post(
+    "/day20/shutdown",
+    response_model=APIResponse[Day20ShutdownResult],
+    summary="Day 20 课程 03：优雅退出时序（摘流量 → 503 → drain → 落盘 → flush）",
+)
+async def run_day20_shutdown(payload: Day20ShutdownRequest) -> APIResponse[Day20ShutdownResult]:
+    """确定性时间线模拟：谁跑完、谁落盘可续跑、谁被撕碎，以及 preStop 够不够长。"""
+    return APIResponse(data=day20_reliability.shutdown_demo(payload))
+
+
+@router.post(
+    "/day20/capacity",
+    response_model=APIResponse[Day20CapacityResult],
+    summary="Day 20 课程 04：三道天花板 → Semaphore 定容 + 恒定速率压测读数与决策",
+)
+async def run_day20_capacity(payload: Day20CapacityRequest) -> APIResponse[Day20CapacityResult]:
+    """钱 / 上游配额 / 机器资源取最小；排队模拟给出 p50/p95/503，按读数决策表给动作。"""
+    return APIResponse(data=day20_reliability.capacity_demo(payload))
+
+
+@router.post(
+    "/day20/slo",
+    response_model=APIResponse[Day20SloResult],
+    summary="Day 20 课程 05：trace → 窗口指标 → 烧毁率 → 告警判定 + runbook",
+)
+async def run_day20_slo(payload: Day20SloRequest) -> APIResponse[Day20SloResult]:
+    """合成同构 span（含一行坏 JSON）：最小样本量守门，短窗口 14.4x / 长窗口 6x 两档。"""
+    return APIResponse(data=day20_reliability.slo_demo(payload))
+
+
+@router.post(
+    "/day20/chaos",
+    response_model=APIResponse[Day20ChaosResult],
+    summary="Day 20 课程 06：混沌演练（注入 + 预期声明表 + 盲区清单）",
+)
+async def run_day20_chaos(payload: Day20ChaosRequest) -> APIResponse[Day20ChaosResult]:
+    """模拟注入下的 run，并逐条核对五条预期：判定落空处就是可靠性盲区。"""
+    return APIResponse(data=day20_reliability.chaos_demo(payload))
